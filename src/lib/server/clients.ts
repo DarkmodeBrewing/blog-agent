@@ -7,26 +7,26 @@ let openai: OpenAI | undefined;
 let octokit: Octokit | undefined;
 
 export const getOpenAI = () => {
-	if (!env.OPENAI_API_KEY) {
-		error(500, 'OPENAI_API_KEY is not configured');
-	}
+  if (!env.OPENAI_API_KEY) {
+    error(500, 'OPENAI_API_KEY is not configured');
+  }
 
-	openai ??= new OpenAI({ apiKey: env.OPENAI_API_KEY });
+  openai ??= new OpenAI({ apiKey: env.OPENAI_API_KEY });
 
-	return openai;
+  return openai;
 };
 
 export const getOctokit = () => {
-	if (!env.GITHUB_TOKEN) {
-		error(500, 'GITHUB_TOKEN is not configured');
-	}
+  if (!env.GITHUB_TOKEN) {
+    error(500, 'GITHUB_TOKEN is not configured');
+  }
 
-	octokit ??= new Octokit({ auth: env.GITHUB_TOKEN });
+  octokit ??= new Octokit({ auth: env.GITHUB_TOKEN });
 
-	return octokit;
+  return octokit;
 };
 
 export const getIntegrationStatus = () => ({
-	github: Boolean(env.GITHUB_TOKEN),
-	openai: Boolean(env.OPENAI_API_KEY)
+  github: Boolean(env.GITHUB_TOKEN),
+  openai: Boolean(env.OPENAI_API_KEY)
 });
