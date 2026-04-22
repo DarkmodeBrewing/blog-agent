@@ -44,6 +44,8 @@
   let loadingPosts = $state(false);
   let syncing = $state(false);
   let generating = $state(false);
+  let savingPrompt = $state(false);
+  let resettingPrompt = $state(false);
   let statusMessage = $state('');
   let errorMessage = $state('');
 
@@ -54,6 +56,7 @@
   let tags = $state('');
   let desiredLength = $state<DesiredLength>('medium');
   let referencePostSlugs = $state('');
+  let systemPrompt = $state('');
 
   let selectedPost = $derived(posts.find((post) => post.slug === selectedSlug) ?? posts[0] ?? null);
 
@@ -106,6 +109,54 @@
       errorMessage = error instanceof Error ? error.message : 'Sync failed';
     } finally {
       syncing = false;
+    }
+  };
+
+  const loadSystemPrompt = async () => {
+    errorMessage = '';
+
+    try {
+      const data = await requestJson<{ prompt: string }>('/api/settings/system-prompt');
+      systemPrompt = data.prompt;
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Failed to load system prompt';
+    }
+  };
+
+  const saveSystemPrompt = async () => {
+    savingPrompt = true;
+    statusMessage = '';
+    errorMessage = '';
+
+    try {
+      await requestJson<{ prompt: string }>('/api/settings/system-prompt', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: systemPrompt })
+      });
+      statusMessage = 'System prompt saved';
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Failed to save system prompt';
+    } finally {
+      savingPrompt = false;
+    }
+  };
+
+  const resetSystemPrompt = async () => {
+    resettingPrompt = true;
+    statusMessage = '';
+    errorMessage = '';
+
+    try {
+      const data = await requestJson<{ prompt: string }>('/api/settings/system-prompt', {
+        method: 'DELETE'
+      });
+      systemPrompt = data.prompt;
+      statusMessage = 'System prompt reset';
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Failed to reset system prompt';
+    } finally {
+      resettingPrompt = false;
     }
   };
 
@@ -175,6 +226,7 @@
 
   onMount(() => {
     void loadPosts();
+    void loadSystemPrompt();
 
     const events = new EventSource('/api/logs');
 
@@ -326,6 +378,39 @@
       {errorMessage}
     </p>
   {/if}
+
+  <section class="rounded-md border border-slate-200 bg-white p-4">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h2 class="text-lg font-semibold text-slate-950">System Prompt</h2>
+        <p class="text-sm text-slate-500">Used for future draft generations.</p>
+      </div>
+      <div class="flex gap-2">
+        <button
+          class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={resettingPrompt}
+          type="button"
+          onclick={() => void resetSystemPrompt()}
+        >
+          {resettingPrompt ? 'Resetting...' : 'Reset'}
+        </button>
+        <button
+          class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={savingPrompt || systemPrompt.trim().length < 100}
+          type="button"
+          onclick={() => void saveSystemPrompt()}
+        >
+          {savingPrompt ? 'Saving...' : 'Save prompt'}
+        </button>
+      </div>
+    </div>
+
+    <textarea
+      class="mt-4 min-h-72 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm leading-6 outline-none focus:border-slate-900"
+      bind:value={systemPrompt}
+      spellcheck="false"
+    ></textarea>
+  </section>
 
   <section class="rounded-md border border-slate-200 bg-white">
     <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4">
