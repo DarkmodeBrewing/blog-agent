@@ -1,4 +1,5 @@
 import { zodResponsesFunction, zodTextFormat } from 'openai/helpers/zod';
+import { randomUUID } from 'node:crypto';
 import { GeneratedDraftSchema, type DraftRequest, type GeneratedDraft } from '../../openai/model';
 import { existingPostToolSchema, invokeTool } from './invoke-tool-call';
 import { getOpenAI } from './clients';
@@ -8,6 +9,7 @@ import type {
 } from 'openai/resources/responses/responses.js';
 import { createDraftFromGeneration } from './post-library';
 import { getSystemPrompt } from './prompt-settings';
+import { recordTokenUsage } from './token-usage';
 import { getErrorMessage, hashText, logWorkflow } from './workflow-log';
 
 const model = 'gpt-5.4';
@@ -18,6 +20,7 @@ type DraftTool = ReturnType<typeof zodResponsesFunction<typeof existingPostToolS
 export const generateBlogDraft = async (
   draftRequest: DraftRequest
 ): Promise<GeneratedDraft | null> => {
+  const sessionId = randomUUID();
   const instructions = getSystemPrompt();
   const input = `Write a blog post draft from this request:\n${JSON.stringify(draftRequest, null, 2)}`;
   const allowedReferenceSlugs = draftRequest.referencePostSlugs ?? [];
@@ -34,6 +37,7 @@ export const generateBlogDraft = async (
       keywordCount: draftRequest.keywords?.length ?? 0,
       tagCount: draftRequest.tags?.length ?? 0,
       referencePostCount: allowedReferenceSlugs.length,
+      sessionId,
       systemPromptLength: instructions.length,
       systemPromptHash: hashText(instructions)
     }
@@ -71,12 +75,21 @@ export const generateBlogDraft = async (
         format: draftTextFormat
       }
     });
+    recordTokenUsage({
+      sessionId,
+      operation: 'blog_draft_generation',
+      stage: 'initial_model_response',
+      model,
+      responseId: response.id,
+      usage: response.usage
+    });
   } catch (cause) {
     logWorkflow({
       level: 'error',
       message: 'generation.failed',
       details: {
         stage: 'initial_model_response',
+        sessionId,
         error: getErrorMessage(cause)
       }
     });
@@ -98,7 +111,8 @@ export const generateBlogDraft = async (
         details: {
           model,
           parsed: Boolean(response.output_parsed),
-          responseId: response.id
+          responseId: response.id,
+          sessionId
         }
       });
 
@@ -110,6 +124,7 @@ export const generateBlogDraft = async (
       message: 'generation.tools.requested',
       details: {
         model,
+        sessionId,
         toolCount: toolCalls.length,
         toolNames: toolCalls.map((call) => call.name)
       }
@@ -149,12 +164,21 @@ export const generateBlogDraft = async (
           format: draftTextFormat
         }
       });
+      recordTokenUsage({
+        sessionId,
+        operation: 'blog_draft_generation',
+        stage: `tool_followup_response_${iteration + 1}`,
+        model,
+        responseId: response.id,
+        usage: response.usage
+      });
     } catch (cause) {
       logWorkflow({
         level: 'error',
         message: 'generation.failed',
         details: {
           stage: 'tool_followup_response',
+          sessionId,
           iteration,
           error: getErrorMessage(cause)
         }
@@ -169,6 +193,7 @@ export const generateBlogDraft = async (
     message: 'generation.failed',
     details: {
       stage: 'tool_iterations_exceeded',
+      sessionId,
       maxToolIterations
     }
   });

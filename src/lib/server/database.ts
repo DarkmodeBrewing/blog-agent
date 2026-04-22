@@ -60,6 +60,20 @@ export const getDatabase = () => {
         FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE SET NULL
       );
 
+      CREATE TABLE IF NOT EXISTS token_usage_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        stage TEXT NOT NULL,
+        model TEXT NOT NULL,
+        response_id TEXT,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        total_tokens INTEGER NOT NULL DEFAULT 0,
+        details_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
       CREATE TABLE IF NOT EXISTS post_status_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         post_id INTEGER NOT NULL,
@@ -73,6 +87,12 @@ export const getDatabase = () => {
       CREATE INDEX IF NOT EXISTS idx_posts_status ON posts(status);
       CREATE INDEX IF NOT EXISTS idx_posts_source ON posts(source);
       CREATE INDEX IF NOT EXISTS idx_generation_runs_post_id ON generation_runs(post_id);
+      CREATE INDEX IF NOT EXISTS idx_token_usage_events_created_at
+        ON token_usage_events(created_at);
+      CREATE INDEX IF NOT EXISTS idx_token_usage_events_model
+        ON token_usage_events(model);
+      CREATE INDEX IF NOT EXISTS idx_token_usage_events_session_id
+        ON token_usage_events(session_id);
       CREATE INDEX IF NOT EXISTS idx_post_status_events_post_id ON post_status_events(post_id);
     `);
   }
