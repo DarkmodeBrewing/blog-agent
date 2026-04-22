@@ -287,6 +287,40 @@ export const updatePostStatus = (slug: string, status: PostStatus, notes?: strin
   }).post;
 };
 
+export const updatePostContent = (
+  slug: string,
+  input: {
+    title: string;
+    ingress?: string | null;
+    body: string;
+    tags?: string[];
+  }
+) => {
+  const post = getPostBySlug(slug);
+
+  if (!post) {
+    return null;
+  }
+
+  return upsertPost({
+    slug: post.slug,
+    title: input.title,
+    ingress: input.ingress ?? null,
+    body: input.body,
+    frontmatter: {
+      ...post.frontmatter,
+      title: input.title,
+      ingress: input.ingress ?? undefined,
+      tags: input.tags ?? post.tags
+    },
+    tags: input.tags ?? post.tags,
+    status: post.status,
+    githubPath: post.githubPath,
+    githubSha: post.githubSha,
+    source: post.source
+  }).post;
+};
+
 export const syncPostsFromGitHub = async () => {
   const files = await getGitHubBlogPostFiles();
   let synced = 0;

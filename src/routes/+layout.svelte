@@ -12,7 +12,9 @@
     <img width="75" src={favicon} alt="Blog-agent" />
     <div class="flex items-center-safe text-2xl">
       <a class="hover:underline" href={resolve('/')}>Home</a>
+      <a class="pl-4 hover:underline" href={resolve('/drafts')}>Drafts</a>
       <a class="pl-4 hover:underline" href={resolve('/posts')}>Posts</a>
+      <a class="pl-4 hover:underline" href={resolve('/settings')}>Settings</a>
     </div>
   </div>
 </header>

@@ -1,8 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
-
   type PostStatus = 'synced' | 'draft' | 'approved' | 'committed' | 'rejected';
-  type DesiredLength = 'short' | 'medium' | 'long';
 
   type PostRecord = {
     id: number;
@@ -10,22 +7,11 @@
     title: string;
     ingress: string | null;
     body: string;
-    frontmatter: Record<string, unknown>;
     tags: string[];
     status: PostStatus;
-    githubPath: string | null;
-    githubSha: string | null;
     source: 'github' | 'generated' | 'manual';
-    createdAt: string;
+    githubPath: string | null;
     updatedAt: string;
-  };
-
-  type LogEvent = {
-    id: number;
-    level: 'debug' | 'info' | 'warn' | 'error';
-    message: string;
-    timestamp: string;
-    details?: unknown;
   };
 
   const statuses: Array<PostStatus | 'all'> = [
@@ -38,36 +24,14 @@
   ];
 
   let posts = $state<PostRecord[]>([]);
-  let logs = $state<LogEvent[]>([]);
-  let selectedSlug = $state<string | null>(null);
   let selectedStatus = $state<PostStatus | 'all'>('all');
-  let loadingPosts = $state(false);
+  let selectedSlug = $state<string | null>(null);
+  let loading = $state(false);
   let syncing = $state(false);
-  let generating = $state(false);
-  let savingPrompt = $state(false);
-  let resettingPrompt = $state(false);
   let statusMessage = $state('');
   let errorMessage = $state('');
 
-  let topic = $state('');
-  let summary = $state('');
-  let keywords = $state('');
-  let category = $state('');
-  let tags = $state('');
-  let desiredLength = $state<DesiredLength>('medium');
-  let referencePostSlugs = $state<string[]>([]);
-  let systemPrompt = $state('');
-
   let selectedPost = $derived(posts.find((post) => post.slug === selectedSlug) ?? posts[0] ?? null);
-  let referencePosts = $derived(
-    posts.filter((post) => referencePostSlugs.includes(post.slug)).map((post) => post.title)
-  );
-
-  const splitCsv = (value: string) =>
-    value
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean);
 
   const requestJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
     const response = await fetch(url, init);
@@ -81,7 +45,7 @@
   };
 
   const loadPosts = async () => {
-    loadingPosts = true;
+    loading = true;
     errorMessage = '';
 
     try {
@@ -95,7 +59,7 @@
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : 'Failed to load posts';
     } finally {
-      loadingPosts = false;
+      loading = false;
     }
   };
 
@@ -115,142 +79,8 @@
     }
   };
 
-  const toggleReferencePost = (slug: string) => {
-    referencePostSlugs = referencePostSlugs.includes(slug)
-      ? referencePostSlugs.filter((referenceSlug) => referenceSlug !== slug)
-      : [...referencePostSlugs, slug];
-  };
-
-  const loadSystemPrompt = async () => {
-    errorMessage = '';
-
-    try {
-      const data = await requestJson<{ prompt: string }>('/api/settings/system-prompt');
-      systemPrompt = data.prompt;
-    } catch (error) {
-      errorMessage = error instanceof Error ? error.message : 'Failed to load system prompt';
-    }
-  };
-
-  const saveSystemPrompt = async () => {
-    savingPrompt = true;
-    statusMessage = '';
-    errorMessage = '';
-
-    try {
-      await requestJson<{ prompt: string }>('/api/settings/system-prompt', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt: systemPrompt })
-      });
-      statusMessage = 'System prompt saved';
-    } catch (error) {
-      errorMessage = error instanceof Error ? error.message : 'Failed to save system prompt';
-    } finally {
-      savingPrompt = false;
-    }
-  };
-
-  const resetSystemPrompt = async () => {
-    resettingPrompt = true;
-    statusMessage = '';
-    errorMessage = '';
-
-    try {
-      const data = await requestJson<{ prompt: string }>('/api/settings/system-prompt', {
-        method: 'DELETE'
-      });
-      systemPrompt = data.prompt;
-      statusMessage = 'System prompt reset';
-    } catch (error) {
-      errorMessage = error instanceof Error ? error.message : 'Failed to reset system prompt';
-    } finally {
-      resettingPrompt = false;
-    }
-  };
-
-  const generateDraft = async () => {
-    generating = true;
-    statusMessage = '';
-    errorMessage = '';
-
-    try {
-      const payload = {
-        topic,
-        summary: summary || undefined,
-        keywords: splitCsv(keywords),
-        category: category || undefined,
-        tags: splitCsv(tags),
-        desiredLength,
-        referencePostSlugs
-      };
-      const data = await requestJson<{ draft: { slug: string } }>(
-        '/api/integrations/openai/generate',
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(payload)
-        }
-      );
-
-      statusMessage = `Generated ${data.draft.slug}`;
-      selectedSlug = data.draft.slug;
-      await loadPosts();
-    } catch (error) {
-      errorMessage = error instanceof Error ? error.message : 'Draft generation failed';
-    } finally {
-      generating = false;
-    }
-  };
-
-  const updateStatus = async (slug: string, status: PostStatus) => {
-    statusMessage = '';
-    errorMessage = '';
-
-    try {
-      await requestJson(`/api/posts/${encodeURIComponent(slug)}/status`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ status })
-      });
-      statusMessage = `${slug} moved to ${status}`;
-      await loadPosts();
-    } catch (error) {
-      errorMessage = error instanceof Error ? error.message : 'Status update failed';
-    }
-  };
-
-  const publishPost = async (slug: string) => {
-    statusMessage = '';
-    errorMessage = '';
-
-    try {
-      await requestJson(`/api/posts/${encodeURIComponent(slug)}/publish`, { method: 'POST' });
-      statusMessage = `${slug} published`;
-      await loadPosts();
-    } catch (error) {
-      errorMessage = error instanceof Error ? error.message : 'Publish failed';
-    }
-  };
-
-  onMount(() => {
+  $effect(() => {
     void loadPosts();
-    void loadSystemPrompt();
-
-    const events = new EventSource('/api/logs');
-
-    events.addEventListener('log', (event) => {
-      const parsed = JSON.parse(event.data) as LogEvent;
-      logs = [parsed, ...logs].slice(0, 50);
-    });
-
-    return () => {
-      events.close();
-    };
-  });
-
-  onDestroy(() => {
-    logs = [];
   });
 </script>
 
@@ -258,197 +88,33 @@
   <title>Posts | Blog Agent</title>
 </svelte:head>
 
-<div class="space-y-6">
-  <section class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
-    <form
-      class="space-y-4 rounded-md border border-slate-200 bg-white p-4"
-      onsubmit={(event) => {
-        event.preventDefault();
-        void generateDraft();
-      }}
-    >
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <h1 class="text-xl font-semibold text-slate-950">Draft Generator</h1>
-        <button
-          class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={generating}
-          type="submit"
-        >
-          {generating ? 'Generating...' : 'Generate draft'}
-        </button>
-      </div>
-
-      <label class="block">
-        <span class="text-sm font-medium text-slate-700">Topic</span>
-        <input
-          class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
-          bind:value={topic}
-          minlength="10"
-          required
-        />
-      </label>
-
-      <label class="block">
-        <span class="text-sm font-medium text-slate-700">Summary</span>
-        <textarea
-          class="mt-1 min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
-          bind:value={summary}
-        ></textarea>
-      </label>
-
-      <div class="grid gap-4 md:grid-cols-2">
-        <label class="block">
-          <span class="text-sm font-medium text-slate-700">Length</span>
-          <select
-            class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
-            bind:value={desiredLength}
-          >
-            <option value="short">Short</option>
-            <option value="medium">Medium</option>
-            <option value="long">Long</option>
-          </select>
-        </label>
-
-        <label class="block">
-          <span class="text-sm font-medium text-slate-700">Category</span>
-          <input
-            class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
-            bind:value={category}
-          />
-        </label>
-      </div>
-
-      <div class="grid gap-4 md:grid-cols-3">
-        <label class="block">
-          <span class="text-sm font-medium text-slate-700">Keywords</span>
-          <input
-            class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
-            bind:value={keywords}
-          />
-        </label>
-
-        <label class="block">
-          <span class="text-sm font-medium text-slate-700">Tags</span>
-          <input
-            class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
-            bind:value={tags}
-          />
-        </label>
-
-        <div class="block">
-          <span class="text-sm font-medium text-slate-700">Selected References</span>
-          <p class="mt-2 min-h-10 rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">
-            {referencePosts.length > 0 ? referencePosts.join(', ') : 'No reference posts selected.'}
-          </p>
-        </div>
-      </div>
-    </form>
-
-    <aside class="rounded-md border border-slate-200 bg-white p-4">
-      <div class="flex items-center justify-between gap-3">
-        <h2 class="text-base font-semibold text-slate-950">Logs</h2>
-        <button
-          class="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700"
-          type="button"
-          onclick={() => (logs = [])}
-        >
-          Clear
-        </button>
-      </div>
-      <div class="mt-3 max-h-72 space-y-2 overflow-auto text-sm">
-        {#if logs.length === 0}
-          <p class="text-slate-500">No log events yet.</p>
-        {:else}
-          {#each logs as log (log.id)}
-            <div class="rounded-md bg-slate-50 p-2">
-              <div class="flex justify-between gap-3 text-xs text-slate-500">
-                <span class="font-medium uppercase">{log.level}</span>
-                <time>{new Date(log.timestamp).toLocaleTimeString()}</time>
-              </div>
-              <p class="mt-1 text-slate-800">{log.message}</p>
-            </div>
-          {/each}
-        {/if}
-      </div>
-    </aside>
-  </section>
-
-  {#if statusMessage}
-    <p
-      class="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800"
-    >
-      {statusMessage}
-    </p>
-  {/if}
-
-  {#if errorMessage}
-    <p class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-      {errorMessage}
-    </p>
-  {/if}
-
-  <section class="rounded-md border border-slate-200 bg-white p-4">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h2 class="text-lg font-semibold text-slate-950">System Prompt</h2>
-        <p class="text-sm text-slate-500">Used for future draft generations.</p>
-      </div>
-      <div class="flex gap-2">
-        <button
-          class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={resettingPrompt}
-          type="button"
-          onclick={() => void resetSystemPrompt()}
-        >
-          {resettingPrompt ? 'Resetting...' : 'Reset'}
-        </button>
-        <button
-          class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={savingPrompt || systemPrompt.trim().length < 100}
-          type="button"
-          onclick={() => void saveSystemPrompt()}
-        >
-          {savingPrompt ? 'Saving...' : 'Save prompt'}
-        </button>
-      </div>
-    </div>
-
-    <textarea
-      class="mt-4 min-h-72 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm leading-6 outline-none focus:border-slate-900"
-      bind:value={systemPrompt}
-      spellcheck="false"
-    ></textarea>
-  </section>
-
+<div class="space-y-4">
   <section class="rounded-md border border-slate-200 bg-white">
     <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4">
       <div>
-        <h2 class="text-lg font-semibold text-slate-950">Library</h2>
-        <p class="text-sm text-slate-500">{posts.length} posts</p>
+        <h1 class="text-xl font-semibold text-slate-950">Post Library</h1>
+        <p class="text-sm text-slate-500">Synced posts, drafts, approvals, and rejected ideas.</p>
       </div>
 
       <div class="flex flex-wrap items-center gap-2">
         <select
           class="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
           bind:value={selectedStatus}
-          onchange={() => void loadPosts()}
         >
           {#each statuses as status (status)}
             <option value={status}>{status}</option>
           {/each}
         </select>
-
         <button
-          class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={loadingPosts}
+          class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+          disabled={loading}
           type="button"
           onclick={() => void loadPosts()}
         >
           Refresh
         </button>
-
         <button
-          class="rounded-md bg-cyan-700 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+          class="rounded-md bg-cyan-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
           disabled={syncing}
           type="button"
           onclick={() => void syncPosts()}
@@ -458,9 +124,23 @@
       </div>
     </div>
 
-    <div class="grid min-h-[28rem] lg:grid-cols-[22rem_minmax(0,1fr)]">
+    {#if statusMessage}
+      <p
+        class="m-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800"
+      >
+        {statusMessage}
+      </p>
+    {/if}
+
+    {#if errorMessage}
+      <p class="m-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        {errorMessage}
+      </p>
+    {/if}
+
+    <div class="grid min-h-[34rem] lg:grid-cols-[24rem_minmax(0,1fr)]">
       <div class="border-b border-slate-200 lg:border-r lg:border-b-0">
-        {#if loadingPosts}
+        {#if loading}
           <p class="p-4 text-sm text-slate-500">Loading posts...</p>
         {:else if posts.length === 0}
           <p class="p-4 text-sm text-slate-500">No posts found.</p>
@@ -477,18 +157,6 @@
                   <span class="rounded bg-slate-200 px-1.5 py-0.5">{post.status}</span>
                   <span class="truncate">{post.slug}</span>
                 </span>
-                <span class="mt-2 flex items-center gap-2 text-xs text-slate-600">
-                  <input
-                    aria-label={`Use ${post.title} as a reference`}
-                    checked={referencePostSlugs.includes(post.slug)}
-                    onclick={(event) => {
-                      event.stopPropagation();
-                      toggleReferencePost(post.slug);
-                    }}
-                    type="checkbox"
-                  />
-                  <span>Reference</span>
-                </span>
               </button>
             {/each}
           </div>
@@ -497,38 +165,14 @@
 
       <article class="p-4">
         {#if selectedPost}
-          <div class="flex flex-wrap items-start justify-between gap-4">
+          <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 class="text-xl font-semibold text-slate-950">{selectedPost.title}</h3>
+              <h2 class="text-xl font-semibold text-slate-950">{selectedPost.title}</h2>
               <p class="mt-1 text-sm text-slate-500">{selectedPost.slug}</p>
             </div>
-            <div class="flex flex-wrap gap-2">
-              {#if selectedPost.status === 'draft'}
-                <button
-                  class="rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white"
-                  type="button"
-                  onclick={() => void updateStatus(selectedPost.slug, 'approved')}
-                >
-                  Approve
-                </button>
-                <button
-                  class="rounded-md bg-red-700 px-3 py-2 text-sm font-medium text-white"
-                  type="button"
-                  onclick={() => void updateStatus(selectedPost.slug, 'rejected')}
-                >
-                  Reject
-                </button>
-              {/if}
-              {#if selectedPost.status === 'approved'}
-                <button
-                  class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white"
-                  type="button"
-                  onclick={() => void publishPost(selectedPost.slug)}
-                >
-                  Publish
-                </button>
-              {/if}
-            </div>
+            <span class="rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+              {selectedPost.status}
+            </span>
           </div>
 
           {#if selectedPost.ingress}
