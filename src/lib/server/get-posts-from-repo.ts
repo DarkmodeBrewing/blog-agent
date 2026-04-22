@@ -3,7 +3,13 @@ import { error } from '@sveltejs/kit';
 import { RequestError } from 'octokit';
 import { getOctokit } from './clients';
 
-const getGitHubRepoConfig = () => {
+export type GitHubBlogPostFile = {
+  path: string;
+  sha: string;
+  content: string;
+};
+
+export const getGitHubRepoConfig = () => {
   const owner = env.GITHUB_REPO_OWNER;
   const repo = env.GITHUB_REPO;
   const blogPostPath = env.GITHUB_REPO_BLOG_POST_PATH;
@@ -47,4 +53,43 @@ export const getPostsFromRepo = async (slug: string): Promise<string> => {
 
     throw cause;
   }
+};
+
+export const getGitHubBlogPostFiles = async (): Promise<GitHubBlogPostFile[]> => {
+  const octokit = getOctokit();
+  const config = getGitHubRepoConfig();
+  const branch = await octokit.rest.repos.getBranch({
+    owner: config.owner,
+    repo: config.repo,
+    branch: config.ref
+  });
+  const tree = await octokit.rest.git.getTree({
+    owner: config.owner,
+    repo: config.repo,
+    tree_sha: branch.data.commit.sha,
+    recursive: 'true'
+  });
+  const markdownFiles = tree.data.tree.filter(
+    (item) =>
+      item.type === 'blob' &&
+      item.path?.startsWith(`${config.blogPostPath}/`) &&
+      item.path.endsWith('.md') &&
+      item.sha
+  );
+
+  return Promise.all(
+    markdownFiles.map(async (item) => {
+      const blob = await octokit.rest.git.getBlob({
+        owner: config.owner,
+        repo: config.repo,
+        file_sha: item.sha as string
+      });
+
+      return {
+        path: item.path as string,
+        sha: item.sha as string,
+        content: Buffer.from(blob.data.content, 'base64').toString('utf-8')
+      };
+    })
+  );
 };

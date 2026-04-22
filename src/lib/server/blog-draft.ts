@@ -5,6 +5,7 @@ import { existingPostToolSchema, invokeTool } from './invoke-tool-call';
 import { getOpenAI } from './clients';
 import { publishLog } from './log-stream';
 import type { ResponseFunctionToolCall } from 'openai/resources/responses/responses.js';
+import { createDraftFromGeneration } from './post-library';
 
 const model = 'gpt-5.4';
 const maxToolIterations = 3;
@@ -43,6 +44,10 @@ export const generateBlogDraft = async (
     const toolCalls = response.output.filter((o) => o.type === 'function_call');
 
     if (toolCalls.length === 0) {
+      if (response.output_parsed) {
+        createDraftFromGeneration(response.output_parsed, draftRequest, model, input);
+      }
+
       return response.output_parsed;
     }
 
