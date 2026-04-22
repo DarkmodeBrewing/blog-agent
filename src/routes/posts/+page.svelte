@@ -55,10 +55,13 @@
   let category = $state('');
   let tags = $state('');
   let desiredLength = $state<DesiredLength>('medium');
-  let referencePostSlugs = $state('');
+  let referencePostSlugs = $state<string[]>([]);
   let systemPrompt = $state('');
 
   let selectedPost = $derived(posts.find((post) => post.slug === selectedSlug) ?? posts[0] ?? null);
+  let referencePosts = $derived(
+    posts.filter((post) => referencePostSlugs.includes(post.slug)).map((post) => post.title)
+  );
 
   const splitCsv = (value: string) =>
     value
@@ -110,6 +113,12 @@
     } finally {
       syncing = false;
     }
+  };
+
+  const toggleReferencePost = (slug: string) => {
+    referencePostSlugs = referencePostSlugs.includes(slug)
+      ? referencePostSlugs.filter((referenceSlug) => referenceSlug !== slug)
+      : [...referencePostSlugs, slug];
   };
 
   const loadSystemPrompt = async () => {
@@ -173,7 +182,7 @@
         category: category || undefined,
         tags: splitCsv(tags),
         desiredLength,
-        referencePostSlugs: splitCsv(referencePostSlugs)
+        referencePostSlugs
       };
       const data = await requestJson<{ draft: { slug: string } }>(
         '/api/integrations/openai/generate',
@@ -326,13 +335,12 @@
           />
         </label>
 
-        <label class="block">
-          <span class="text-sm font-medium text-slate-700">Reference Slugs</span>
-          <input
-            class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
-            bind:value={referencePostSlugs}
-          />
-        </label>
+        <div class="block">
+          <span class="text-sm font-medium text-slate-700">Selected References</span>
+          <p class="mt-2 min-h-10 rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            {referencePosts.length > 0 ? referencePosts.join(', ') : 'No reference posts selected.'}
+          </p>
+        </div>
       </div>
     </form>
 
@@ -468,6 +476,18 @@
                 <span class="mt-1 flex items-center gap-2 text-xs text-slate-500">
                   <span class="rounded bg-slate-200 px-1.5 py-0.5">{post.status}</span>
                   <span class="truncate">{post.slug}</span>
+                </span>
+                <span class="mt-2 flex items-center gap-2 text-xs text-slate-600">
+                  <input
+                    aria-label={`Use ${post.title} as a reference`}
+                    checked={referencePostSlugs.includes(post.slug)}
+                    onclick={(event) => {
+                      event.stopPropagation();
+                      toggleReferencePost(post.slug);
+                    }}
+                    type="checkbox"
+                  />
+                  <span>Reference</span>
                 </span>
               </button>
             {/each}

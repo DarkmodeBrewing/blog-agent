@@ -17,10 +17,11 @@ export const generateBlogDraft = async (
 ): Promise<GeneratedDraft | null> => {
   const instructions = getSystemPrompt();
   const input = `Write a blog post draft from this request:\n${JSON.stringify(draftRequest, null, 2)}`;
+  const allowedReferenceSlugs = draftRequest.referencePostSlugs ?? [];
 
   const tools: DraftTool[] = [];
 
-  if (draftRequest.referencePostSlugs && draftRequest.referencePostSlugs.length > 0) {
+  if (allowedReferenceSlugs.length > 0) {
     tools.push(
       zodResponsesFunction({
         name: 'get_existing_post',
@@ -72,7 +73,7 @@ export const generateBlogDraft = async (
           };
         }
 
-        const output = await invokeTool(call.name, args.value);
+        const output = await invokeTool(call.name, args.value, allowedReferenceSlugs);
 
         return {
           type: 'function_call_output' as const,

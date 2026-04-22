@@ -31,6 +31,9 @@ Length guidance:
 
 Reference posts:
 - If referencePostSlugs are provided and a get_existing_post tool is available, use it before drafting when prior context would improve consistency.
+- Only request posts whose slugs appear in the provided referencePostSlugs list.
+- Reference posts can have any workflow status: synced, draft, approved, committed, or rejected.
+- Treat rejected posts as useful negative or historical context. Do not copy their direction as if it was approved.
 - Do not invent details from unavailable reference posts.
 - Use reference posts for tone, continuity, and factual context, not for copying text.
 
