@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiUrl, requestJson } from '$lib/client/request-json';
+
   type PostStatus = 'synced' | 'draft' | 'approved' | 'committed' | 'rejected';
 
   type PostRecord = {
@@ -33,24 +35,12 @@
 
   let selectedPost = $derived(posts.find((post) => post.slug === selectedSlug) ?? posts[0] ?? null);
 
-  const requestJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
-    const response = await fetch(url, init);
-    const data = (await response.json().catch(() => ({}))) as T & { error?: string };
-
-    if (!response.ok) {
-      throw new Error(data.error ?? `Request failed with ${response.status}`);
-    }
-
-    return data;
-  };
-
   const loadPosts = async () => {
     loading = true;
     errorMessage = '';
-
     try {
       const query = selectedStatus === 'all' ? '' : `?status=${selectedStatus}`;
-      const data = await requestJson<{ posts: PostRecord[] }>(`/api/posts${query}`);
+      const data = await requestJson<{ posts: PostRecord[] }>(apiUrl(`/api/posts${query}`));
       posts = data.posts;
 
       if (selectedSlug && !posts.some((post) => post.slug === selectedSlug)) {
@@ -67,9 +57,10 @@
     syncing = true;
     statusMessage = '';
     errorMessage = '';
-
     try {
-      const data = await requestJson<{ synced: number }>('/api/posts/sync', { method: 'POST' });
+      const data = await requestJson<{ synced: number }>(apiUrl('/api/posts/sync'), {
+        method: 'POST'
+      });
       statusMessage = `Synced ${data.synced} posts`;
       await loadPosts();
     } catch (error) {

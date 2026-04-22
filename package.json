@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev --host 127.0.0.1 --port 5173 --strictPort",
+    "dev:proxy": "DEV_SERVER_BASE=/proxy/5173/ DEV_SERVER_ORIGIN=https://code.darkmode.tools DEV_SERVER_HMR_HOST=code.darkmode.tools DEV_SERVER_HMR_PROTOCOL=wss DEV_SERVER_HMR_CLIENT_PORT=443 DEV_SERVER_HMR_PATH=/proxy/5173 vite dev --host 127.0.0.1 --port 5173 --strictPort",
+    "rebuild:native": "npm rebuild better-sqlite3",
     "dev:network": "vite dev --host 0.0.0.0 --port 5173 --strictPort",
     "build": "vite build",
     "preview": "vite preview",

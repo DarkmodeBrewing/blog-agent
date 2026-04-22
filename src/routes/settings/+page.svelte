@@ -1,26 +1,17 @@
 <script lang="ts">
+  import { apiUrl, requestJson } from '$lib/client/request-json';
+
   let systemPrompt = $state('');
   let saving = $state(false);
   let resetting = $state(false);
   let statusMessage = $state('');
   let errorMessage = $state('');
 
-  const requestJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
-    const response = await fetch(url, init);
-    const data = (await response.json().catch(() => ({}))) as T & { error?: string };
-
-    if (!response.ok) {
-      throw new Error(data.error ?? `Request failed with ${response.status}`);
-    }
-
-    return data;
-  };
-
   const loadPrompt = async () => {
     errorMessage = '';
 
     try {
-      const data = await requestJson<{ prompt: string }>('/api/settings/system-prompt');
+      const data = await requestJson<{ prompt: string }>(apiUrl('/api/settings/system-prompt'));
       systemPrompt = data.prompt;
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : 'Failed to load system prompt';
@@ -33,7 +24,7 @@
     errorMessage = '';
 
     try {
-      await requestJson<{ prompt: string }>('/api/settings/system-prompt', {
+      await requestJson<{ prompt: string }>(apiUrl('/api/settings/system-prompt'), {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ prompt: systemPrompt })
@@ -52,7 +43,7 @@
     errorMessage = '';
 
     try {
-      const data = await requestJson<{ prompt: string }>('/api/settings/system-prompt', {
+      const data = await requestJson<{ prompt: string }>(apiUrl('/api/settings/system-prompt'), {
         method: 'DELETE'
       });
       systemPrompt = data.prompt;

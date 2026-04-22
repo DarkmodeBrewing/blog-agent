@@ -10,6 +10,14 @@ const encodeEvent = (event: string, data: unknown) => {
 export const GET: RequestHandler = ({ request }) => {
   const stream = new ReadableStream({
     start(controller) {
+      let closed = false;
+
+      const enqueue = (event: string, data: unknown) => {
+        if (!closed) {
+          controller.enqueue(encodeEvent(event, data));
+        }
+      };
+
       controller.enqueue(
         encodeEvent('ready', {
           message: 'Log stream connected',
@@ -18,26 +26,32 @@ export const GET: RequestHandler = ({ request }) => {
       );
 
       const unsubscribe = subscribeToLogs((logEvent) => {
-        controller.enqueue(encodeEvent('log', logEvent));
+        enqueue('log', logEvent);
       });
 
       const heartbeat = setInterval(() => {
-        controller.enqueue(
-          encodeEvent('heartbeat', {
-            timestamp: new Date().toISOString()
-          })
-        );
+        enqueue('heartbeat', {
+          timestamp: new Date().toISOString()
+        });
       }, 30000);
+
+      const cleanup = () => {
+        if (closed) return;
+
+        closed = true;
+        clearInterval(heartbeat);
+        unsubscribe();
+      };
 
       request.signal.addEventListener(
         'abort',
         () => {
-          clearInterval(heartbeat);
-          unsubscribe();
-          controller.close();
+          cleanup();
         },
         { once: true }
       );
+
+      return cleanup;
     }
   });
 

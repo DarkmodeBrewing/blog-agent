@@ -29,6 +29,18 @@ npm run dev
 npm run dev -- --open
 ```
 
+When running through code-server's forwarded proxy, set the dev origin so Vite generates bundle URLs under the proxy path:
+
+```sh
+npm run dev:proxy
+```
+
+If native dependencies were installed with a different Node.js version than the one running the dev server, rebuild them from the same terminal:
+
+```sh
+npm run rebuild:native
+```
+
 ## Building
 
 To create a production version of your app:

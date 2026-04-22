@@ -13,20 +13,22 @@ export type LogEvent = {
 type LogSubscriber = (event: LogEvent) => void;
 
 const subscribers = new Set<LogSubscriber>();
-const insertLogEvent = getDatabase().prepare<{
-  level: LogLevel;
-  message: string;
-  details: string | null;
-  timestamp: string;
-}>(`
-  INSERT INTO log_events (level, message, details, created_at)
-  VALUES (@level, @message, @details, @timestamp)
-`);
+
+const insertLogEvent = () =>
+  getDatabase().prepare<{
+    level: LogLevel;
+    message: string;
+    details: string | null;
+    timestamp: string;
+  }>(`
+    INSERT INTO log_events (level, message, details, created_at)
+    VALUES (@level, @message, @details, @timestamp)
+  `);
 
 export const publishLog = (event: Omit<LogEvent, 'id' | 'timestamp'>) => {
   const timestamp = new Date().toISOString();
   const details = event.details === undefined ? null : JSON.stringify(event.details);
-  const result = insertLogEvent.run({
+  const result = insertLogEvent().run({
     level: event.level,
     message: event.message,
     details,

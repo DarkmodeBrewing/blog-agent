@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { apiUrl, requestJson } from '$lib/client/request-json';
   import { onDestroy, onMount } from 'svelte';
 
   type PostStatus = 'synced' | 'draft' | 'approved' | 'committed' | 'rejected';
@@ -64,23 +65,12 @@
       .map((item) => item.trim())
       .filter(Boolean);
 
-  const requestJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
-    const response = await fetch(url, init);
-    const data = (await response.json().catch(() => ({}))) as T & { error?: string };
-
-    if (!response.ok) {
-      throw new Error(data.error ?? `Request failed with ${response.status}`);
-    }
-
-    return data;
-  };
-
   const loadPosts = async () => {
     loadingPosts = true;
     errorMessage = '';
 
     try {
-      const data = await requestJson<{ posts: PostRecord[] }>('/api/posts');
+      const data = await requestJson<{ posts: PostRecord[] }>(apiUrl('/api/posts'));
       posts = data.posts;
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : 'Failed to load posts';
@@ -118,7 +108,7 @@
         desiredLength,
         referencePostSlugs
       };
-      const data = await requestJson<DraftResponse>('/api/integrations/openai/generate', {
+      const data = await requestJson<DraftResponse>(apiUrl('/api/integrations/openai/generate'), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload)
@@ -146,7 +136,7 @@
     errorMessage = '';
 
     try {
-      await requestJson(`/api/posts/${encodeURIComponent(editorSlug)}`, {
+      await requestJson(apiUrl(`/api/posts/${encodeURIComponent(editorSlug)}`), {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -171,7 +161,7 @@
     await saveDraft();
 
     try {
-      await requestJson(`/api/posts/${encodeURIComponent(editorSlug)}/status`, {
+      await requestJson(apiUrl(`/api/posts/${encodeURIComponent(editorSlug)}/status`), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ status })
@@ -189,7 +179,9 @@
     await saveDraft();
 
     try {
-      await requestJson(`/api/posts/${encodeURIComponent(editorSlug)}/publish`, { method: 'POST' });
+      await requestJson(apiUrl(`/api/posts/${encodeURIComponent(editorSlug)}/publish`), {
+        method: 'POST'
+      });
       statusMessage = `${editorSlug} published`;
       await loadPosts();
     } catch (error) {
@@ -200,7 +192,7 @@
   onMount(() => {
     void loadPosts();
 
-    const events = new EventSource('/api/logs');
+    const events = new EventSource(apiUrl('/api/logs'));
 
     events.addEventListener('log', (event) => {
       const parsed = JSON.parse(event.data) as LogEvent;
@@ -218,7 +210,7 @@
 </script>
 
 <svelte:head>
-  <title>Drafts | Blog Agent</title>
+  <title>Drafts editor | Blog Agent</title>
 </svelte:head>
 
 <div class="space-y-4">
