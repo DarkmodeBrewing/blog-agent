@@ -4,10 +4,12 @@ import { systemsPrompt } from '../../openai/prompts';
 import { existingPostToolSchema, invokeTool } from './invoke-tool-call';
 import { getOpenAI } from './clients';
 import { publishLog } from './log-stream';
+import type { ResponseFunctionToolCall } from 'openai/resources/responses/responses.js';
 
 const model = 'gpt-5.4';
 const maxToolIterations = 3;
 const draftTextFormat = zodTextFormat(GeneratedDraftSchema, 'blog_draft');
+type DraftTool = ReturnType<typeof zodResponsesFunction<typeof existingPostToolSchema>>;
 
 export const generateBlogDraft = async (
   draftRequest: DraftRequest
@@ -15,7 +17,7 @@ export const generateBlogDraft = async (
   const instructions = `${systemsPrompt}`;
   const input = `Write a blog post draft from this request:\n${JSON.stringify(draftRequest, null, 2)}`;
 
-  const tools = [];
+  const tools: DraftTool[] = [];
 
   if (draftRequest.referencePostSlugs && draftRequest.referencePostSlugs.length > 0) {
     tools.push(
@@ -52,8 +54,20 @@ export const generateBlogDraft = async (
 
     const toolOutputs = await Promise.all(
       toolCalls.map(async (call) => {
-        const args = JSON.parse(call.arguments);
-        const output = await invokeTool(call.name, args);
+        const args = parseToolArguments(call);
+
+        if (!args.ok) {
+          return {
+            type: 'function_call_output' as const,
+            call_id: call.call_id,
+            output: JSON.stringify({
+              error: 'Malformed tool arguments',
+              details: args.error
+            })
+          };
+        }
+
+        const output = await invokeTool(call.name, args.value);
 
         return {
           type: 'function_call_output' as const,
@@ -74,4 +88,20 @@ export const generateBlogDraft = async (
   }
 
   throw new Error('Model exceeded the maximum number of tool iterations');
+};
+
+const parseToolArguments = (
+  call: ResponseFunctionToolCall
+): { ok: true; value: unknown } | { ok: false; error: string } => {
+  try {
+    return {
+      ok: true,
+      value: JSON.parse(call.arguments) as unknown
+    };
+  } catch (cause) {
+    return {
+      ok: false,
+      error: cause instanceof Error ? cause.message : 'Unknown JSON parse error'
+    };
+  }
 };

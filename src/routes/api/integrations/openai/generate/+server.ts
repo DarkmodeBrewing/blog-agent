@@ -19,7 +19,20 @@ export const POST: RequestHandler = async ({ request }) => {
 
   const body = parsedBody.data;
 
-  const draft = await generateBlogDraft(body);
+  let draft;
+
+  try {
+    draft = await generateBlogDraft(body);
+  } catch (cause) {
+    console.error(cause);
+
+    return json(
+      {
+        error: 'Draft generation failed'
+      },
+      { status: 502 }
+    );
+  }
 
   if (!draft) {
     return json({ error: 'Model did not return a valid draft' }, { status: 502 });
