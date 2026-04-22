@@ -8,11 +8,10 @@ import type {
   ResponseFunctionToolCall
 } from 'openai/resources/responses/responses.js';
 import { createDraftFromGeneration } from './post-library';
-import { getSystemPrompt } from './prompt-settings';
+import { getSelectedModel, getSystemPrompt } from './prompt-settings';
 import { recordTokenUsage } from './token-usage';
 import { getErrorMessage, hashText, logWorkflow } from './workflow-log';
 
-const model = 'gpt-5.4';
 const maxToolIterations = 3;
 const draftTextFormat = zodTextFormat(GeneratedDraftSchema, 'blog_draft');
 type DraftTool = ReturnType<typeof zodResponsesFunction<typeof existingPostToolSchema>>;
@@ -21,6 +20,7 @@ export const generateBlogDraft = async (
   draftRequest: DraftRequest
 ): Promise<GeneratedDraft | null> => {
   const sessionId = randomUUID();
+  const model = getSelectedModel();
   const instructions = getSystemPrompt();
   const input = `Write a blog post draft from this request:\n${JSON.stringify(draftRequest, null, 2)}`;
   const allowedReferenceSlugs = draftRequest.referencePostSlugs ?? [];
