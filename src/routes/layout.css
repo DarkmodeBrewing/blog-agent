@@ -1,1 +1,6 @@
 @import 'tailwindcss';
+
+:root {
+  --color_header_bg: #101820;
+  --color_header_fg: #e2e8f0;
+}
