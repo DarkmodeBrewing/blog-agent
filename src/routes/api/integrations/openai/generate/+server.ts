@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { DraftRequestSchema } from '../../../../../openai/model';
 import { generateBlogDraft } from '$lib/server/blog-draft';
+import { getErrorMessage, logWorkflow } from '$lib/server/workflow-log';
 
 export const POST: RequestHandler = async ({ request }) => {
   const requestBody = await request.json().catch(() => undefined);
@@ -25,6 +26,16 @@ export const POST: RequestHandler = async ({ request }) => {
     draft = await generateBlogDraft(body);
   } catch (cause) {
     console.error(cause);
+    logWorkflow({
+      level: 'error',
+      message: 'generation.failed',
+      details: {
+        stage: 'api.integrations.openai.generate',
+        topic: body.topic,
+        desiredLength: body.desiredLength,
+        error: getErrorMessage(cause)
+      }
+    });
 
     return json(
       {

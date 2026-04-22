@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { z } from 'zod/v4';
 import { BlogSlugSchema } from '../../../../openai/model';
 import { getPostBySlug, updatePostContent } from '$lib/server/post-library';
+import { getErrorMessage, logWorkflow } from '$lib/server/workflow-log';
 
 const UpdatePostSchema = z.object({
   title: z.string().min(1),
@@ -41,7 +42,24 @@ export const PUT: RequestHandler = async ({ params, request }) => {
     return json({ error: 'Invalid post update', issues: parsedBody.error.issues }, { status: 400 });
   }
 
-  const post = updatePostContent(parsedSlug.data, parsedBody.data);
+  let post;
+
+  try {
+    post = updatePostContent(parsedSlug.data, parsedBody.data);
+  } catch (cause) {
+    logWorkflow({
+      level: 'error',
+      message: 'api.request.failed',
+      details: {
+        route: '/api/posts/[slug]',
+        method: 'PUT',
+        slug: parsedSlug.data,
+        error: getErrorMessage(cause)
+      }
+    });
+
+    return json({ error: 'Failed to update post' }, { status: 500 });
+  }
 
   if (!post) {
     return json({ error: 'Post not found' }, { status: 404 });

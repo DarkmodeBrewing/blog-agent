@@ -1,6 +1,7 @@
 import z from 'zod/v4';
 import { BlogSlugSchema } from '../../openai/model';
 import { getPostBySlug } from './post-library';
+import { logWorkflow } from './workflow-log';
 
 export const existingPostToolSchema = z.object({
   slug: BlogSlugSchema
@@ -21,6 +22,16 @@ const getExistingPost = async (args: unknown, allowedReferenceSlugs: string[]) =
   const parsedArgs = existingPostToolSchema.safeParse(args);
 
   if (!parsedArgs.success) {
+    logWorkflow({
+      level: 'warn',
+      message: 'generation.tool.called',
+      details: {
+        toolName: 'get_existing_post',
+        success: false,
+        reason: 'malformed_arguments'
+      }
+    });
+
     return {
       error: 'Model issued malformed tool arguments',
       issues: parsedArgs.error.issues
@@ -30,6 +41,17 @@ const getExistingPost = async (args: unknown, allowedReferenceSlugs: string[]) =
   const { slug } = parsedArgs.data;
 
   if (!allowedReferenceSlugs.includes(slug)) {
+    logWorkflow({
+      level: 'warn',
+      message: 'generation.tool.called',
+      details: {
+        toolName: 'get_existing_post',
+        slug,
+        success: false,
+        reason: 'slug_not_selected'
+      }
+    });
+
     return {
       found: false,
       slug,
@@ -40,12 +62,35 @@ const getExistingPost = async (args: unknown, allowedReferenceSlugs: string[]) =
   const post = getPostBySlug(slug);
 
   if (!post) {
+    logWorkflow({
+      level: 'warn',
+      message: 'generation.tool.called',
+      details: {
+        toolName: 'get_existing_post',
+        slug,
+        success: false,
+        reason: 'post_not_found'
+      }
+    });
+
     return {
       found: false,
       slug,
       reason: 'No local library post was found for this slug'
     };
   }
+
+  logWorkflow({
+    level: 'info',
+    message: 'generation.tool.called',
+    details: {
+      toolName: 'get_existing_post',
+      slug,
+      success: true,
+      status: post.status,
+      bodyLength: post.body.length
+    }
+  });
 
   return {
     found: true,

@@ -3,6 +3,7 @@ import { getDatabase } from './database';
 import { getGitHubBlogPostFiles, getGitHubRepoConfig } from './get-posts-from-repo';
 import type { DraftRequest, GeneratedDraft } from '../../openai/model';
 import { getOctokit } from './clients';
+import { hashText, logWorkflow } from './workflow-log';
 
 export type PostStatus = 'synced' | 'draft' | 'approved' | 'committed' | 'rejected';
 export type PostSource = 'github' | 'generated' | 'manual';
@@ -262,6 +263,22 @@ export const createDraftFromGeneration = (
       sourcePostSlugsJson: JSON.stringify(draft.sourcePostUsed)
     });
 
+  logWorkflow({
+    level: 'info',
+    message: 'generation.draft.saved',
+    details: {
+      slug: post.slug,
+      title: post.title,
+      tags: post.tags,
+      tagCount: post.tags.length,
+      bodyLength: post.body.length,
+      model,
+      promptLength: prompt.length,
+      promptHash: hashText(prompt),
+      sourcePostUsed: draft.sourcePostUsed
+    }
+  });
+
   return post;
 };
 
@@ -272,7 +289,7 @@ export const updatePostStatus = (slug: string, status: PostStatus, notes?: strin
     return null;
   }
 
-  return upsertPost({
+  const updatedPost = upsertPost({
     slug: post.slug,
     title: post.title,
     ingress: post.ingress,
@@ -285,6 +302,19 @@ export const updatePostStatus = (slug: string, status: PostStatus, notes?: strin
     source: post.source,
     statusNotes: notes
   }).post;
+
+  logWorkflow({
+    level: 'info',
+    message: 'post.status.changed',
+    details: {
+      slug,
+      fromStatus: post.status,
+      toStatus: status,
+      hasNotes: Boolean(notes)
+    }
+  });
+
+  return updatedPost;
 };
 
 export const updatePostContent = (
@@ -302,7 +332,7 @@ export const updatePostContent = (
     return null;
   }
 
-  return upsertPost({
+  const updatedPost = upsertPost({
     slug: post.slug,
     title: input.title,
     ingress: input.ingress ?? null,
@@ -319,11 +349,46 @@ export const updatePostContent = (
     githubSha: post.githubSha,
     source: post.source
   }).post;
+
+  const changedFields = [
+    post.title !== input.title ? 'title' : null,
+    (post.ingress ?? null) !== (input.ingress ?? null) ? 'ingress' : null,
+    post.body !== input.body ? 'body' : null,
+    JSON.stringify(post.tags) !== JSON.stringify(input.tags ?? post.tags) ? 'tags' : null
+  ].filter((field): field is string => Boolean(field));
+
+  logWorkflow({
+    level: 'info',
+    message: 'post.edited',
+    details: {
+      slug,
+      changedFields,
+      previousBodyLength: post.body.length,
+      newBodyLength: input.body.length,
+      bodyLengthDelta: input.body.length - post.body.length
+    }
+  });
+
+  return updatedPost;
 };
 
 export const syncPostsFromGitHub = async () => {
+  const config = getGitHubRepoConfig();
+  logWorkflow({
+    level: 'info',
+    message: 'sync.started',
+    details: {
+      owner: config.owner,
+      repo: config.repo,
+      path: config.blogPostPath,
+      ref: config.ref
+    }
+  });
+
   const files = await getGitHubBlogPostFiles();
   let synced = 0;
+  let inserted = 0;
+  let updated = 0;
 
   for (const file of files) {
     const parsed = matter(file.content);
@@ -334,7 +399,20 @@ export const syncPostsFromGitHub = async () => {
       getStringField(frontmatter, 'ingress') ?? getStringField(frontmatter, 'description') ?? null;
     const tags = getStringArrayField(frontmatter, 'tags');
 
-    upsertPost({
+    logWorkflow({
+      level: 'debug',
+      message: 'sync.file.parsed',
+      details: {
+        path: file.path,
+        slug,
+        title,
+        tagCount: tags.length,
+        bodyLength: parsed.content.trim().length
+      }
+    });
+
+    const existing = getPostBySlug(slug);
+    const { changed } = upsertPost({
       slug,
       title,
       ingress,
@@ -348,8 +426,38 @@ export const syncPostsFromGitHub = async () => {
       statusNotes: 'Synced from GitHub'
     });
 
+    if (!existing) {
+      inserted += 1;
+    } else if (changed) {
+      updated += 1;
+    }
+
+    logWorkflow({
+      level: 'debug',
+      message: 'sync.post.upserted',
+      details: {
+        slug,
+        status: 'synced',
+        source: 'github',
+        changed,
+        operation: existing ? 'updated' : 'inserted'
+      }
+    });
+
     synced += 1;
   }
+
+  logWorkflow({
+    level: 'info',
+    message: 'sync.completed',
+    details: {
+      discovered: files.length,
+      synced,
+      inserted,
+      updated,
+      skipped: files.length - synced
+    }
+  });
 
   return {
     synced
@@ -370,6 +478,19 @@ export const publishApprovedDraft = async (slug: string) => {
   const octokit = getOctokit();
   const config = getGitHubRepoConfig();
   const path = post.githubPath ?? `${config.blogPostPath}/${post.slug}.md`;
+
+  logWorkflow({
+    level: 'info',
+    message: 'post.publish.started',
+    details: {
+      slug: post.slug,
+      title: post.title,
+      path,
+      repo: `${config.owner}/${config.repo}`,
+      ref: config.ref
+    }
+  });
+
   const content = matter.stringify(post.body, {
     ...post.frontmatter,
     title: post.title,
@@ -406,7 +527,7 @@ export const publishApprovedDraft = async (slug: string) => {
     sha: currentSha
   });
 
-  return upsertPost({
+  const publishedPost = upsertPost({
     slug: post.slug,
     title: post.title,
     ingress: post.ingress,
@@ -419,4 +540,17 @@ export const publishApprovedDraft = async (slug: string) => {
     source: 'github',
     statusNotes: 'Published to GitHub'
   }).post;
+
+  logWorkflow({
+    level: 'info',
+    message: 'post.publish.completed',
+    details: {
+      slug: publishedPost.slug,
+      path,
+      sha: publishedPost.githubSha,
+      commitSha: result.data.commit.sha
+    }
+  });
+
+  return publishedPost;
 };
