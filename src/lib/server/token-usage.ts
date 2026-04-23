@@ -1,7 +1,10 @@
-import { desc, gte, sql } from 'drizzle-orm';
-import { getDatabase } from './database';
-import { tokenUsageEvents } from './db/schema';
 import { logWorkflow } from './workflow-log';
+import {
+  insertTokenUsageEvent,
+  selectRecentTokenUsageEvents,
+  selectTokenUsageDailySummary,
+  selectTokenUsageSessionSummary
+} from './repositories/token-usage-repository';
 
 type TokenUsage = {
   inputTokens: number;
@@ -82,20 +85,17 @@ export const recordTokenUsage = (input: RecordTokenUsageInput) => {
     return null;
   }
 
-  getDatabase()
-    .insert(tokenUsageEvents)
-    .values({
-      sessionId: input.sessionId,
-      operation: input.operation,
-      stage: input.stage,
-      model: input.model,
-      responseId: input.responseId ?? null,
-      inputTokens: normalizedUsage.inputTokens,
-      outputTokens: normalizedUsage.outputTokens,
-      totalTokens: normalizedUsage.totalTokens,
-      detailsJson: JSON.stringify(normalizedUsage.details)
-    })
-    .run();
+  insertTokenUsageEvent({
+    sessionId: input.sessionId,
+    operation: input.operation,
+    stage: input.stage,
+    model: input.model,
+    responseId: input.responseId ?? null,
+    inputTokens: normalizedUsage.inputTokens,
+    outputTokens: normalizedUsage.outputTokens,
+    totalTokens: normalizedUsage.totalTokens,
+    detailsJson: JSON.stringify(normalizedUsage.details)
+  });
 
   logWorkflow({
     level: 'info',
@@ -116,52 +116,15 @@ export const recordTokenUsage = (input: RecordTokenUsageInput) => {
 };
 
 export const getTokenUsageDailySummary = (days = 30) => {
-  const since = sql<string>`datetime('now', '-' || ${days} || ' days')`;
-
-  return getDatabase()
-    .select({
-      date: sql<string>`date(${tokenUsageEvents.createdAt})`,
-      model: tokenUsageEvents.model,
-      input_tokens: sql<number>`sum(${tokenUsageEvents.inputTokens})`,
-      output_tokens: sql<number>`sum(${tokenUsageEvents.outputTokens})`,
-      total_tokens: sql<number>`sum(${tokenUsageEvents.totalTokens})`,
-      request_count: sql<number>`count(*)`
-    })
-    .from(tokenUsageEvents)
-    .where(gte(tokenUsageEvents.createdAt, since))
-    .groupBy(sql`date(${tokenUsageEvents.createdAt})`, tokenUsageEvents.model)
-    .orderBy(sql`date(${tokenUsageEvents.createdAt})`, tokenUsageEvents.model)
-    .all() satisfies TokenUsageSummaryRow[];
+  return selectTokenUsageDailySummary(days) satisfies TokenUsageSummaryRow[];
 };
 
 export const getTokenUsageSessionSummary = (days = 30) => {
-  const since = sql<string>`datetime('now', '-' || ${days} || ' days')`;
-
-  return getDatabase()
-    .select({
-      session_id: tokenUsageEvents.sessionId,
-      model: tokenUsageEvents.model,
-      first_seen: sql<string>`min(${tokenUsageEvents.createdAt})`,
-      last_seen: sql<string>`max(${tokenUsageEvents.createdAt})`,
-      input_tokens: sql<number>`sum(${tokenUsageEvents.inputTokens})`,
-      output_tokens: sql<number>`sum(${tokenUsageEvents.outputTokens})`,
-      total_tokens: sql<number>`sum(${tokenUsageEvents.totalTokens})`,
-      request_count: sql<number>`count(*)`
-    })
-    .from(tokenUsageEvents)
-    .where(gte(tokenUsageEvents.createdAt, since))
-    .groupBy(tokenUsageEvents.sessionId, tokenUsageEvents.model)
-    .orderBy(desc(sql`max(${tokenUsageEvents.createdAt})`))
-    .all() satisfies TokenUsageSessionRow[];
+  return selectTokenUsageSessionSummary(days) satisfies TokenUsageSessionRow[];
 };
 
 export const getRecentTokenUsageEvents = (limit = 25) => {
-  const rows = getDatabase()
-    .select()
-    .from(tokenUsageEvents)
-    .orderBy(desc(tokenUsageEvents.createdAt))
-    .limit(limit)
-    .all();
+  const rows = selectRecentTokenUsageEvents(limit);
 
   return rows.map((row) => ({
     id: row.id,

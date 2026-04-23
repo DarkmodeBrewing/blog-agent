@@ -10,8 +10,8 @@ This document breaks the requested changes into implementation phases in the ord
 - [x] Phase 4: Content model expansion
 - [x] Phase 5: Generation workflow redesign
 - [x] Phase 6: Prompt and template refactor
-- [ ] Phase 7: API refactor
-- [ ] Phase 8: Database and Drizzle migration
+- [x] Phase 7: API refactor
+- [x] Phase 8: Database and Drizzle migration
 - [ ] Phase 9: UI refactor
 - [ ] Phase 10: Accessibility, usability, and responsive pass
 - [ ] Phase 11: Logging and observability adjustments
@@ -192,6 +192,8 @@ Status: Completed
 
 ## Phase 8: Database and Drizzle Migration
 
+- Status: Completed
+
 - Update Drizzle schema to support:
   - grouped content bundles
   - content type and derivation relationships
@@ -199,16 +201,17 @@ Status: Completed
   - publish attempts/history
   - frontmatter templates
   - settings completeness state if needed
-- Introduce repository-layer modules around the new schema.
-  - settings repository
-  - content repository
-  - publishing repository
-  - sync repository
-- Migrate existing rows.
-  - Existing blog posts become `blog` content items.
-  - Existing statuses map into the new editorial/delivery state model.
-  - Existing GitHub metadata maps into a GitHub publish record where possible.
-- Generate and apply Drizzle migrations.
+- [x] Introduce repository-layer modules around the new schema.
+  - [x] settings repository
+  - [x] content repository
+  - [x] publishing repository
+  - [x] sync repository
+- [x] Migrate existing rows.
+  - [x] Existing blog posts become `blog` content items.
+  - [x] Existing statuses map into the new editorial/delivery state model.
+  - [x] Existing GitHub metadata maps into a GitHub publish record where possible.
+- [x] Generate and apply Drizzle migrations.
+  - `db:generate` and `db:migrate` scripts are now available for explicit migration workflows.
 
 ## Phase 9: UI Refactor
 

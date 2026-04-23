@@ -9,6 +9,7 @@
     "rebuild:native": "npm rebuild better-sqlite3",
     "dev:network": "vite dev --host 0.0.0.0 --port 5173 --strictPort",
     "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
     "build": "vite build",
     "preview": "vite preview",
     "prepare": "svelte-kit sync || echo ''",

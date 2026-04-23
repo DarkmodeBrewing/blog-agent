@@ -1,17 +1,19 @@
 import { randomUUID } from 'node:crypto';
-import { eq, sql } from 'drizzle-orm';
 import type { DraftRequest } from '../../openai/model';
 import { generateContentBundle } from './blog-draft';
-import { getDatabase } from './database';
-import { generationJobs } from './db/schema';
 import { getBundlePostsForSlug, getPostBySlug, getRelatedPosts } from './post-library';
 import { getErrorMessage, logWorkflow } from './workflow-log';
-
-type GenerationJobStatus = 'queued' | 'running' | 'completed' | 'failed';
+import {
+  insertGenerationJobRow,
+  selectGenerationJobRow,
+  updateGenerationJobRow,
+  type GenerationJobRow,
+  type GenerationJobStatus
+} from './repositories/generation-job-repository';
 
 const runningJobs = new Set<string>();
 
-const mapGenerationJob = (row: typeof generationJobs.$inferSelect) => {
+const mapGenerationJob = (row: GenerationJobRow) => {
   const primaryDraft = row.draftSlug ? getPostBySlug(row.draftSlug) : null;
   const bundleDrafts = row.draftSlug ? getBundlePostsForSlug(row.draftSlug) : [];
 
@@ -39,7 +41,7 @@ const mapGenerationJob = (row: typeof generationJobs.$inferSelect) => {
 };
 
 export const getGenerationJob = (id: string) => {
-  const row = getDatabase().select().from(generationJobs).where(eq(generationJobs.id, id)).get();
+  const row = selectGenerationJobRow(id);
 
   return row ? mapGenerationJob(row) : null;
 };
@@ -47,14 +49,11 @@ export const getGenerationJob = (id: string) => {
 export const createGenerationJob = (request: DraftRequest) => {
   const id = randomUUID();
 
-  getDatabase()
-    .insert(generationJobs)
-    .values({
-      id,
-      status: 'queued',
-      requestJson: JSON.stringify(request)
-    })
-    .run();
+  insertGenerationJobRow({
+    id,
+    status: 'queued',
+    requestJson: JSON.stringify(request)
+  });
 
   logWorkflow({
     level: 'info',
@@ -83,24 +82,7 @@ const updateGenerationJobStatus = (
     error?: string | null;
   }
 ) => {
-  getDatabase()
-    .update(generationJobs)
-    .set({
-      status: input.status,
-      draftSlug: input.draftSlug ?? sql`${generationJobs.draftSlug}`,
-      error: input.error ?? null,
-      startedAt:
-        input.status === 'running'
-          ? sql`coalesce(${generationJobs.startedAt}, datetime('now'))`
-          : sql`${generationJobs.startedAt}`,
-      completedAt:
-        input.status === 'completed' || input.status === 'failed'
-          ? sql`datetime('now')`
-          : sql`${generationJobs.completedAt}`,
-      updatedAt: sql`datetime('now')`
-    })
-    .where(eq(generationJobs.id, id))
-    .run();
+  updateGenerationJobRow(id, input);
 };
 
 export const runGenerationJob = async (id: string) => {

@@ -1,4 +1,3 @@
-import { eq } from 'drizzle-orm';
 import { z } from 'zod/v4';
 import {
   composeSystemPrompt,
@@ -6,9 +5,8 @@ import {
   systemsPrompt,
   type PromptTemplates
 } from '../../openai/prompts';
-import { getDatabase } from './database';
-import { appSettings } from './db/schema';
 import { getErrorMessage, hashText, logWorkflow } from './workflow-log';
+import { getSettingValue, setSettingValue } from './repositories/settings-repository';
 
 const settingKeys = {
   systemPrompt: 'system_prompt',
@@ -164,29 +162,11 @@ type AppSettingsUpdateInput = {
 };
 
 const getSetting = (key: string) => {
-  return getDatabase()
-    .select({ value: appSettings.value })
-    .from(appSettings)
-    .where(eq(appSettings.key, key))
-    .get()?.value;
+  return getSettingValue(key);
 };
 
 const setSetting = (key: string, value: string) => {
-  getDatabase()
-    .insert(appSettings)
-    .values({
-      key,
-      value,
-      updatedAt: new Date().toISOString()
-    })
-    .onConflictDoUpdate({
-      target: appSettings.key,
-      set: {
-        value,
-        updatedAt: new Date().toISOString()
-      }
-    })
-    .run();
+  setSettingValue(key, value);
 };
 
 const parseBoolean = (value: string | undefined, defaultValue: boolean) => {

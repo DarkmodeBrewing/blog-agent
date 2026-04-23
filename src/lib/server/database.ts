@@ -10,15 +10,11 @@ const databasePath = resolve(process.cwd(), env.SQLITE_DATABASE_PATH ?? 'data/bl
 let sqliteDatabase: Database.Database | undefined;
 let drizzleDatabase: BetterSQLite3Database<typeof schema> | undefined;
 
-export const getSqliteDatabase = () => {
-  if (!sqliteDatabase) {
-    mkdirSync(dirname(databasePath), { recursive: true });
-
-    sqliteDatabase = new Database(databasePath);
-    sqliteDatabase.pragma('journal_mode = WAL');
-    sqliteDatabase.pragma('foreign_keys = ON');
-
-    sqliteDatabase.exec(`
+const ensureCompatibilitySchema = (database: Database.Database) => {
+  // Drizzle migrations are the preferred path for schema evolution.
+  // This compatibility bootstrap keeps local SQLite installs usable when the
+  // database file predates the current migration state.
+  database.exec(`
       CREATE TABLE IF NOT EXISTS log_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         level TEXT NOT NULL CHECK (level IN ('debug', 'info', 'warn', 'error')),
@@ -141,33 +137,37 @@ export const getSqliteDatabase = () => {
       CREATE INDEX IF NOT EXISTS idx_post_publications_status ON post_publications(status);
     `);
 
-    const postColumns = sqliteDatabase.prepare(`PRAGMA table_info('posts')`).all() as Array<{
-      name: string;
-    }>;
-    const postColumnNames = new Set(postColumns.map((column) => column.name));
-    const addPostColumn = (name: string, definition: string) => {
-      if (!postColumnNames.has(name)) {
-        sqliteDatabase!.exec(`ALTER TABLE posts ADD COLUMN ${definition}`);
-      }
-    };
+  const postColumns = database.prepare(`PRAGMA table_info('posts')`).all() as Array<{
+    name: string;
+  }>;
+  const postColumnNames = new Set(postColumns.map((column) => column.name));
+  const addPostColumn = (name: string, definition: string) => {
+    if (!postColumnNames.has(name)) {
+      database.exec(`ALTER TABLE posts ADD COLUMN ${definition}`);
+    }
+  };
 
-    addPostColumn(
-      'bundle_id',
-      'bundle_id INTEGER REFERENCES content_bundles(id) ON DELETE SET NULL'
-    );
-    addPostColumn(
-      'parent_post_id',
-      'parent_post_id INTEGER REFERENCES posts(id) ON DELETE SET NULL'
-    );
-    addPostColumn('content_type', "content_type TEXT NOT NULL DEFAULT 'blog'");
-    addPostColumn('variant_role', "variant_role TEXT NOT NULL DEFAULT 'standalone'");
-    addPostColumn('locked_at', 'locked_at TEXT');
+  addPostColumn('bundle_id', 'bundle_id INTEGER REFERENCES content_bundles(id) ON DELETE SET NULL');
+  addPostColumn('parent_post_id', 'parent_post_id INTEGER REFERENCES posts(id) ON DELETE SET NULL');
+  addPostColumn('content_type', "content_type TEXT NOT NULL DEFAULT 'blog'");
+  addPostColumn('variant_role', "variant_role TEXT NOT NULL DEFAULT 'standalone'");
+  addPostColumn('locked_at', 'locked_at TEXT');
 
-    sqliteDatabase.exec(`
+  database.exec(`
       CREATE INDEX IF NOT EXISTS idx_posts_bundle_id ON posts(bundle_id);
       CREATE INDEX IF NOT EXISTS idx_posts_parent_post_id ON posts(parent_post_id);
       CREATE INDEX IF NOT EXISTS idx_posts_content_type ON posts(content_type);
     `);
+};
+
+export const getSqliteDatabase = () => {
+  if (!sqliteDatabase) {
+    mkdirSync(dirname(databasePath), { recursive: true });
+
+    sqliteDatabase = new Database(databasePath);
+    sqliteDatabase.pragma('journal_mode = WAL');
+    sqliteDatabase.pragma('foreign_keys = ON');
+    ensureCompatibilitySchema(sqliteDatabase);
   }
 
   return sqliteDatabase;

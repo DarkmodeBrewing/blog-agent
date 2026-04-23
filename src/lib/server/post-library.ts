@@ -1,17 +1,29 @@
 import { randomUUID } from 'node:crypto';
 import matter from 'gray-matter';
-import { desc, eq, sql } from 'drizzle-orm';
-import { getDatabase } from './database';
-import {
-  contentBundles,
-  generationRuns,
-  postPublications,
-  posts,
-  postStatusEvents
-} from './db/schema';
 import { getGitHubBlogPostFiles, getGitHubRepoConfig } from './get-posts-from-repo';
 import type { DraftRequest, GeneratedDraft, GeneratedSocialVariant } from '../../openai/model';
 import { hashText, logWorkflow } from './workflow-log';
+import {
+  insertContentBundle,
+  insertGenerationRun,
+  insertPostPublication,
+  insertPostStatusEvent,
+  lockPostById,
+  selectChildPostRows,
+  selectPublicationRowsForPost,
+  selectPostRowById,
+  selectPostRowBySlug,
+  selectPostRows,
+  selectPostRowsByBundleId,
+  upsertPostRow,
+  type PostPublicationRow,
+  type PostRow
+} from './repositories/content-repository';
+import {
+  insertPublicationRecord,
+  lockPublishedPostById
+} from './repositories/publishing-repository';
+import { selectSyncedPostRowBySlug } from './repositories/sync-repository';
 
 export type PostStatus = 'synced' | 'draft' | 'approved' | 'committed' | 'rejected';
 export type PostSource = 'github' | 'generated' | 'manual';
@@ -105,7 +117,7 @@ type UpsertPostInput = {
   statusNotes?: string;
 };
 
-const mapPublicationRow = (row: typeof postPublications.$inferSelect): PostPublicationRecord => ({
+const mapPublicationRow = (row: PostPublicationRow): PostPublicationRecord => ({
   id: row.id,
   postId: row.postId,
   target: row.target,
@@ -122,13 +134,7 @@ const mapPublicationRow = (row: typeof postPublications.$inferSelect): PostPubli
 });
 
 const listPostPublications = (postId: number) => {
-  return getDatabase()
-    .select()
-    .from(postPublications)
-    .where(eq(postPublications.postId, postId))
-    .orderBy(desc(postPublications.updatedAt))
-    .all()
-    .map(mapPublicationRow);
+  return selectPublicationRowsForPost(postId).map(mapPublicationRow);
 };
 
 const getPublicationSummary = (publications: PostPublicationRecord[]): PublicationSummary => {
@@ -147,7 +153,7 @@ const getPublicationSummary = (publications: PostPublicationRecord[]): Publicati
   };
 };
 
-const mapPostRow = (row: typeof posts.$inferSelect): PostRecord => {
+const mapPostRow = (row: PostRow): PostRecord => {
   const publications = listPostPublications(row.id);
   const publicationSummary = getPublicationSummary(publications);
   const isPublished = publicationSummary.publishedTargets.length > 0;
@@ -194,32 +200,17 @@ const getStringArrayField = (data: Record<string, unknown>, key: string) => {
 };
 
 export const listPosts = (status?: PostStatus) => {
-  const database = getDatabase();
-  const rows = status
-    ? database
-        .select()
-        .from(posts)
-        .where(eq(posts.status, status))
-        .orderBy(desc(posts.updatedAt))
-        .all()
-    : database.select().from(posts).orderBy(desc(posts.updatedAt)).all();
-
-  return rows.map(mapPostRow);
+  return selectPostRows(status).map(mapPostRow);
 };
 
 export const getPostBySlug = (slug: string) => {
-  const row = getDatabase().select().from(posts).where(eq(posts.slug, slug)).get();
+  const row = selectPostRowBySlug(slug);
 
   return row ? mapPostRow(row) : null;
 };
 
 export const getPostsByBundleId = (bundleId: number, excludeSlug?: string) => {
-  const rows = getDatabase()
-    .select()
-    .from(posts)
-    .where(eq(posts.bundleId, bundleId))
-    .orderBy(desc(posts.updatedAt))
-    .all();
+  const rows = selectPostRowsByBundleId(bundleId);
 
   return rows.map(mapPostRow).filter((post) => (excludeSlug ? post.slug !== excludeSlug : true));
 };
@@ -238,23 +229,14 @@ export const getRelatedPosts = (slug: string) => {
   const related: PostRecord[] = [];
 
   if (post.parentPostId) {
-    const parentRow = getDatabase()
-      .select()
-      .from(posts)
-      .where(eq(posts.id, post.parentPostId))
-      .get();
+    const parentRow = selectPostRowById(post.parentPostId);
 
     if (parentRow) {
       related.push(mapPostRow(parentRow));
     }
   }
 
-  const childRows = getDatabase()
-    .select()
-    .from(posts)
-    .where(eq(posts.parentPostId, post.id))
-    .orderBy(desc(posts.updatedAt))
-    .all();
+  const childRows = selectChildPostRows(post.id);
 
   related.push(...childRows.map(mapPostRow));
 
@@ -349,18 +331,10 @@ export const getPostBundleBySlug = (slug: string) => {
 
 export const createContentBundle = () => {
   const key = randomUUID();
-  const result = getDatabase()
-    .insert(contentBundles)
-    .values({
-      key
-    })
-    .run();
-
-  return Number(result.lastInsertRowid);
+  return insertContentBundle(key);
 };
 
 export const upsertPost = (input: UpsertPostInput) => {
-  const database = getDatabase();
   const existing = getPostBySlug(input.slug);
 
   const values = {
@@ -381,30 +355,7 @@ export const upsertPost = (input: UpsertPostInput) => {
     lockedAt: input.lockedAt ?? existing?.lockedAt ?? null
   };
 
-  const result = database
-    .insert(posts)
-    .values(values)
-    .onConflictDoUpdate({
-      target: posts.slug,
-      set: {
-        bundleId: values.bundleId,
-        parentPostId: values.parentPostId,
-        title: values.title,
-        ingress: values.ingress,
-        body: values.body,
-        frontmatterJson: values.frontmatterJson,
-        tagsJson: values.tagsJson,
-        contentType: values.contentType,
-        variantRole: values.variantRole,
-        status: values.status,
-        githubPath: values.githubPath,
-        githubSha: values.githubSha,
-        source: values.source,
-        lockedAt: values.lockedAt,
-        updatedAt: sql`datetime('now')`
-      }
-    })
-    .run();
+  const result = upsertPostRow(values);
 
   const post = getPostBySlug(input.slug);
 
@@ -413,15 +364,12 @@ export const upsertPost = (input: UpsertPostInput) => {
   }
 
   if (!existing || existing.status !== input.status) {
-    database
-      .insert(postStatusEvents)
-      .values({
-        postId: post.id,
-        fromStatus: existing?.status ?? null,
-        toStatus: input.status,
-        notes: input.statusNotes ?? null
-      })
-      .run();
+    insertPostStatusEvent({
+      postId: post.id,
+      fromStatus: existing?.status ?? null,
+      toStatus: input.status,
+      notes: input.statusNotes ?? null
+    });
   }
 
   return {
@@ -459,17 +407,14 @@ export const createDraftFromGeneration = (
     statusNotes: 'Generated by OpenAI'
   });
 
-  getDatabase()
-    .insert(generationRuns)
-    .values({
-      postId: post.id,
-      model,
-      prompt,
-      requestJson: JSON.stringify(request),
-      responseJson: JSON.stringify(draft),
-      sourcePostSlugsJson: JSON.stringify(draft.sourcePostUsed)
-    })
-    .run();
+  insertGenerationRun({
+    postId: post.id,
+    model,
+    prompt,
+    requestJson: JSON.stringify(request),
+    responseJson: JSON.stringify(draft),
+    sourcePostSlugsJson: JSON.stringify(draft.sourcePostUsed)
+  });
 
   logWorkflow({
     level: 'info',
@@ -534,17 +479,14 @@ export const createVariantDraftFromGeneration = (
     statusNotes: `Derived ${input.variant.platform} variant generated from ${parent.slug}`
   });
 
-  getDatabase()
-    .insert(generationRuns)
-    .values({
-      postId: post.id,
-      model,
-      prompt,
-      requestJson: JSON.stringify(request),
-      responseJson: JSON.stringify(input.variant),
-      sourcePostSlugsJson: JSON.stringify([parent.slug])
-    })
-    .run();
+  insertGenerationRun({
+    postId: post.id,
+    model,
+    prompt,
+    requestJson: JSON.stringify(request),
+    responseJson: JSON.stringify(input.variant),
+    sourcePostSlugsJson: JSON.stringify([parent.slug])
+  });
 
   logWorkflow({
     level: 'info',
@@ -701,7 +643,7 @@ export const syncPostsFromGitHub = async () => {
       }
     });
 
-    const existing = getPostBySlug(slug);
+    const existing = selectSyncedPostRowBySlug(slug);
     const { changed } = upsertPost({
       slug,
       title,
@@ -775,32 +717,22 @@ export const recordPostPublication = (
     return null;
   }
 
-  getDatabase()
-    .insert(postPublications)
-    .values({
-      postId: post.id,
-      target: input.target,
-      status: input.status,
-      externalId: input.externalId ?? null,
-      remoteUrl: input.remoteUrl ?? null,
-      filePath: input.filePath ?? null,
-      commitSha: input.commitSha ?? null,
-      artifactJson: input.artifact ? JSON.stringify(input.artifact) : null,
-      error: input.error ?? null,
-      publishedAt: input.status === 'published' ? new Date().toISOString() : null,
-      updatedAt: new Date().toISOString()
-    })
-    .run();
+  insertPublicationRecord({
+    postId: post.id,
+    target: input.target,
+    status: input.status,
+    externalId: input.externalId ?? null,
+    remoteUrl: input.remoteUrl ?? null,
+    filePath: input.filePath ?? null,
+    commitSha: input.commitSha ?? null,
+    artifactJson: input.artifact ? JSON.stringify(input.artifact) : null,
+    error: input.error ?? null,
+    publishedAt: input.status === 'published' ? new Date().toISOString() : null,
+    updatedAt: new Date().toISOString()
+  });
 
   if (input.status === 'published') {
-    getDatabase()
-      .update(posts)
-      .set({
-        lockedAt: sql`coalesce(${posts.lockedAt}, datetime('now'))`,
-        updatedAt: sql`datetime('now')`
-      })
-      .where(eq(posts.id, post.id))
-      .run();
+    lockPublishedPostById(post.id);
   }
 
   return getPostBySlug(slug);
