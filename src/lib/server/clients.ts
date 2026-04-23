@@ -1,32 +1,39 @@
-import { env } from '$env/dynamic/private';
 import { error } from '@sveltejs/kit';
 import { Octokit } from 'octokit';
 import OpenAI from 'openai';
+import { getGitHubPublishSettings, getOpenAISettings } from './app-settings';
 
 let openai: OpenAI | undefined;
+let openaiApiKey: string | undefined;
 let octokit: Octokit | undefined;
+let githubToken: string | undefined;
 
 export const getOpenAI = () => {
-  if (!env.OPENAI_API_KEY) {
+  const settings = getOpenAISettings();
+
+  if (!settings.apiKey) {
     error(500, 'OPENAI_API_KEY is not configured');
   }
 
-  openai ??= new OpenAI({ apiKey: env.OPENAI_API_KEY });
+  if (!openai || openaiApiKey !== settings.apiKey) {
+    openai = new OpenAI({ apiKey: settings.apiKey });
+    openaiApiKey = settings.apiKey;
+  }
 
   return openai;
 };
 
 export const getOctokit = () => {
-  if (!env.GITHUB_TOKEN) {
+  const settings = getGitHubPublishSettings();
+
+  if (!settings.token) {
     error(500, 'GITHUB_TOKEN is not configured');
   }
 
-  octokit ??= new Octokit({ auth: env.GITHUB_TOKEN });
+  if (!octokit || githubToken !== settings.token) {
+    octokit = new Octokit({ auth: settings.token });
+    githubToken = settings.token;
+  }
 
   return octokit;
 };
-
-export const getIntegrationStatus = () => ({
-  github: Boolean(env.GITHUB_TOKEN),
-  openai: Boolean(env.OPENAI_API_KEY)
-});

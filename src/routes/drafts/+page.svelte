@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { apiUrl, requestJson } from '$lib/client/request-json';
   import { onDestroy, onMount } from 'svelte';
 
@@ -38,8 +39,24 @@
     timestamp: string;
   };
 
+  type ReadinessIssue = {
+    id: string;
+    severity: 'error' | 'warning';
+    title: string;
+    message: string;
+    href: string;
+  };
+
+  type AppReadiness = {
+    status: 'ready' | 'ready_with_warnings' | 'incomplete';
+    hasBlockingIssues: boolean;
+    readyForGeneration: boolean;
+    issues: ReadinessIssue[];
+  };
+
   let posts = $state<PostRecord[]>([]);
   let logs = $state<LogEvent[]>([]);
+  let appReadiness = $state<AppReadiness | null>(null);
   let loadingPosts = $state(false);
   let generating = $state(false);
   let generationJobId = $state<string | null>(null);
@@ -66,7 +83,8 @@
     posts.filter((post) => referencePostSlugs.includes(post.slug)).map((post) => post.title)
   );
   let hasDraft = $derived(Boolean(editorSlug));
-  let controlsDisabled = $derived(generating || saving);
+  let generationBlocked = $derived(appReadiness ? !appReadiness.readyForGeneration : false);
+  let controlsDisabled = $derived(generating || saving || generationBlocked);
 
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -87,6 +105,17 @@
       errorMessage = error instanceof Error ? error.message : 'Failed to load posts';
     } finally {
       loadingPosts = false;
+    }
+  };
+
+  const loadReadiness = async () => {
+    try {
+      const data = await requestJson<{ readiness: AppReadiness }>(
+        apiUrl('/api/settings/readiness')
+      );
+      appReadiness = data.readiness;
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Failed to load application status';
     }
   };
 
@@ -151,6 +180,11 @@
   };
 
   const generateDraft = async () => {
+    if (generationBlocked) {
+      errorMessage = 'Complete the required application setup before generating content';
+      return;
+    }
+
     generating = true;
     generationJobId = null;
     generationJobStatus = 'queued';
@@ -250,6 +284,7 @@
 
   onMount(() => {
     void loadPosts();
+    void loadReadiness();
 
     const events = new EventSource(apiUrl('/api/logs'));
 
@@ -288,6 +323,16 @@
     </p>
   {/if}
 
+  {#if appReadiness && !appReadiness.readyForGeneration}
+    <div class="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+      <p class="font-medium">Generation is unavailable until setup is complete.</p>
+      <p class="mt-1">
+        {appReadiness.issues[0]?.message}
+        <a class="underline" href={resolve('/settings')}>Open settings</a>.
+      </p>
+    </div>
+  {/if}
+
   {#if generating}
     <div class="rounded-md border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-900">
       <div class="flex items-center gap-3">
@@ -316,10 +361,10 @@
           <h1 class="text-lg font-semibold text-slate-950">Generate</h1>
           <button
             class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-            disabled={generating}
+            disabled={controlsDisabled}
             type="submit"
           >
-            {generating ? 'Generating...' : 'Generate'}
+            {generating ? 'Generating...' : generationBlocked ? 'Setup required' : 'Generate'}
           </button>
         </div>
 
@@ -328,7 +373,7 @@
           <input
             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={topic}
-            disabled={generating}
+            disabled={controlsDisabled}
             minlength="10"
             required
           />
@@ -339,7 +384,7 @@
           <textarea
             class="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={summary}
-            disabled={generating}
+            disabled={controlsDisabled}
           ></textarea>
         </label>
 
@@ -349,7 +394,7 @@
             <select
               class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
               bind:value={desiredLength}
-              disabled={generating}
+              disabled={controlsDisabled}
             >
               <option value="short">Short</option>
               <option value="medium">Medium</option>
@@ -362,7 +407,7 @@
             <input
               class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
               bind:value={category}
-              disabled={generating}
+              disabled={controlsDisabled}
             />
           </label>
         </div>
@@ -372,7 +417,7 @@
           <input
             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={keywords}
-            disabled={generating}
+            disabled={controlsDisabled}
           />
         </label>
 
@@ -381,7 +426,7 @@
           <input
             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={requestedTags}
-            disabled={generating}
+            disabled={controlsDisabled}
           />
         </label>
 
@@ -416,7 +461,7 @@
               <h2 class="text-base font-semibold text-slate-950">References</h2>
               <button
                 class="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700"
-                disabled={generating}
+                disabled={controlsDisabled}
                 type="button"
                 onclick={() => void loadPosts()}
               >
@@ -436,7 +481,7 @@
                   <label class="flex gap-2 text-sm">
                     <input
                       checked={referencePostSlugs.includes(post.slug)}
-                      disabled={generating}
+                      disabled={controlsDisabled}
                       onchange={() => toggleReferencePost(post.slug)}
                       type="checkbox"
                     />
@@ -448,7 +493,7 @@
                   {#if post.status === 'draft' || post.status === 'approved'}
                     <button
                       class="mt-2 rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700"
-                      disabled={generating}
+                      disabled={controlsDisabled}
                       type="button"
                       onclick={() => loadDraftIntoEditor(post)}
                     >
@@ -511,7 +556,7 @@
           <input
             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={editorTitle}
-            disabled={!hasDraft || generating}
+            disabled={!hasDraft || controlsDisabled}
           />
         </label>
 
@@ -520,7 +565,7 @@
           <textarea
             class="mt-1 min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={editorIngress}
-            disabled={!hasDraft || generating}
+            disabled={!hasDraft || controlsDisabled}
           ></textarea>
         </label>
 
@@ -529,7 +574,7 @@
           <input
             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={editorTags}
-            disabled={!hasDraft || generating}
+            disabled={!hasDraft || controlsDisabled}
           />
         </label>
 
@@ -538,7 +583,7 @@
           <textarea
             class="mt-1 min-h-136 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm leading-6 outline-none focus:border-slate-900"
             bind:value={editorBody}
-            disabled={!hasDraft || generating}
+            disabled={!hasDraft || controlsDisabled}
             spellcheck="false"
           ></textarea>
         </label>

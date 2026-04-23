@@ -16,6 +16,10 @@
     updatedAt: string;
   };
 
+  type AppReadiness = {
+    readyForGitHubSync: boolean;
+  };
+
   const statuses: Array<PostStatus | 'all'> = [
     'all',
     'draft',
@@ -26,6 +30,7 @@
   ];
 
   let posts = $state<PostRecord[]>([]);
+  let appReadiness = $state<AppReadiness | null>(null);
   let selectedStatus = $state<PostStatus | 'all'>('all');
   let selectedSlug = $state<string | null>(null);
   let loading = $state(false);
@@ -53,6 +58,17 @@
     }
   };
 
+  const loadReadiness = async () => {
+    try {
+      const data = await requestJson<{ readiness: AppReadiness }>(
+        apiUrl('/api/settings/readiness')
+      );
+      appReadiness = data.readiness;
+    } catch {
+      appReadiness = null;
+    }
+  };
+
   const syncPosts = async () => {
     syncing = true;
     statusMessage = '';
@@ -72,6 +88,7 @@
 
   $effect(() => {
     void loadPosts();
+    void loadReadiness();
   });
 </script>
 
@@ -106,7 +123,7 @@
         </button>
         <button
           class="rounded-md bg-cyan-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-          disabled={syncing}
+          disabled={syncing || (appReadiness ? !appReadiness.readyForGitHubSync : false)}
           type="button"
           onclick={() => void syncPosts()}
         >

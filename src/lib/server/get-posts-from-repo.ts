@@ -1,6 +1,6 @@
-import { env } from '$env/dynamic/private';
 import { error } from '@sveltejs/kit';
 import { RequestError } from 'octokit';
+import { getGitHubPublishSettings } from './app-settings';
 import { getOctokit } from './clients';
 
 export type GitHubBlogPostFile = {
@@ -10,10 +10,11 @@ export type GitHubBlogPostFile = {
 };
 
 export const getGitHubRepoConfig = () => {
-  const owner = env.GITHUB_REPO_OWNER;
-  const repo = env.GITHUB_REPO;
-  const blogPostPath = env.GITHUB_REPO_BLOG_POST_PATH;
-  const ref = env.GITHUB_REPO_REF ?? 'main';
+  const settings = getGitHubPublishSettings();
+  const owner = settings.owner;
+  const repo = settings.repo;
+  const blogPostPath = settings.blogPostPath;
+  const ref = settings.branch;
 
   if (!owner || !repo || !blogPostPath) {
     error(500, 'GitHub repo configuration is incomplete');

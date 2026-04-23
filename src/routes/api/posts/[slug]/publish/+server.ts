@@ -1,10 +1,23 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { BlogSlugSchema } from '../../../../../openai/model';
+import { getReadiness } from '$lib/server/app-settings';
 import { publishApprovedDraft } from '$lib/server/post-library';
 import { getErrorMessage, logWorkflow } from '$lib/server/workflow-log';
 
 export const POST: RequestHandler = async ({ params }) => {
+  const readiness = getReadiness();
+
+  if (!readiness.readyForGitHubPublishing) {
+    return json(
+      {
+        error: 'GitHub publishing settings are incomplete',
+        readiness
+      },
+      { status: 409 }
+    );
+  }
+
   const parsedSlug = BlogSlugSchema.safeParse(params.slug);
 
   if (!parsedSlug.success) {
