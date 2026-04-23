@@ -10,7 +10,7 @@ import {
   postStatusEvents
 } from './db/schema';
 import { getGitHubBlogPostFiles, getGitHubRepoConfig } from './get-posts-from-repo';
-import type { DraftRequest, GeneratedDraft } from '../../openai/model';
+import type { DraftRequest, GeneratedDraft, GeneratedSocialVariant } from '../../openai/model';
 import { hashText, logWorkflow } from './workflow-log';
 
 export type PostStatus = 'synced' | 'draft' | 'approved' | 'committed' | 'rejected';
@@ -255,6 +255,27 @@ export const getRelatedPosts = (slug: string) => {
   });
 };
 
+export const getBundlePostsForSlug = (slug: string) => {
+  const post = getPostBySlug(slug);
+
+  if (!post) {
+    return [];
+  }
+
+  const bundlePosts = post.bundleId
+    ? [post, ...getPostsByBundleId(post.bundleId, post.slug)]
+    : [post, ...getRelatedPosts(slug)];
+
+  return bundlePosts.sort((a, b) => {
+    if (a.contentType === 'blog' && b.contentType !== 'blog') return -1;
+    if (b.contentType === 'blog' && a.contentType !== 'blog') return 1;
+    if (a.variantRole === 'primary' && b.variantRole !== 'primary') return -1;
+    if (b.variantRole === 'primary' && a.variantRole !== 'primary') return 1;
+
+    return b.updatedAt.localeCompare(a.updatedAt);
+  });
+};
+
 export const createContentBundle = () => {
   const key = randomUUID();
   const result = getDatabase()
@@ -389,6 +410,77 @@ export const createDraftFromGeneration = (
       promptLength: prompt.length,
       promptHash: hashText(prompt),
       sourcePostUsed: draft.sourcePostUsed
+    }
+  });
+
+  return post;
+};
+
+export const createVariantDraftFromGeneration = (
+  input: {
+    parentSlug: string;
+    variant: GeneratedSocialVariant;
+    body: string;
+  },
+  request: DraftRequest,
+  model: string,
+  prompt: string
+) => {
+  const parent = getPostBySlug(input.parentSlug);
+
+  if (!parent) {
+    throw new Error(`Parent draft not found: ${input.parentSlug}`);
+  }
+
+  const slugBase = `${parent.slug}-${input.variant.platform}`;
+  let slug = slugBase;
+  let counter = 2;
+
+  while (getPostBySlug(slug)) {
+    slug = `${slugBase}-${counter}`;
+    counter += 1;
+  }
+
+  const titleSuffix = input.variant.platform === 'x' ? 'X Post' : 'LinkedIn Post';
+  const { post } = upsertPost({
+    bundleId: parent.bundleId,
+    parentPostId: parent.id,
+    slug,
+    title: `${parent.title} (${titleSuffix})`,
+    ingress: parent.ingress,
+    body: input.body,
+    frontmatter: {},
+    tags: parent.tags,
+    contentType: input.variant.platform,
+    variantRole: 'derived',
+    status: 'draft',
+    source: 'generated',
+    statusNotes: `Derived ${input.variant.platform} variant generated from ${parent.slug}`
+  });
+
+  getDatabase()
+    .insert(generationRuns)
+    .values({
+      postId: post.id,
+      model,
+      prompt,
+      requestJson: JSON.stringify(request),
+      responseJson: JSON.stringify(input.variant),
+      sourcePostSlugsJson: JSON.stringify([parent.slug])
+    })
+    .run();
+
+  logWorkflow({
+    level: 'info',
+    message: 'generation.variant.saved',
+    details: {
+      slug: post.slug,
+      parentSlug: parent.slug,
+      platform: input.variant.platform,
+      bodyLength: input.body.length,
+      model,
+      promptLength: prompt.length,
+      promptHash: hashText(prompt)
     }
   });
 

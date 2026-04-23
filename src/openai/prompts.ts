@@ -46,3 +46,67 @@ Markdown constraints:
 - Avoid em dashes. Use commas, parentheses, or shorter sentences instead.
 - Keep headings descriptive and useful.
 `;
+
+export const buildPrimaryDraftInput = (request: {
+  topic: string;
+  summary?: string;
+  keywords?: string[];
+  category?: string;
+  tags?: string[];
+  desiredLength: string;
+  outputs: string[];
+  publishTargets: string[];
+  blogPreferences?: {
+    frontmatter?: Record<string, boolean | undefined>;
+  };
+  referencePostSlugs?: string[];
+}) => {
+  return `
+Write the primary blog draft from this request.
+
+Planned outputs:
+${JSON.stringify(request.outputs, null, 2)}
+
+Planned publish targets:
+${JSON.stringify(request.publishTargets, null, 2)}
+
+Blog frontmatter preferences:
+${JSON.stringify(request.blogPreferences?.frontmatter ?? {}, null, 2)}
+
+Request:
+${JSON.stringify(request, null, 2)}
+`.trim();
+};
+
+export const buildDerivedSocialInput = (input: {
+  platform: 'x' | 'linkedin';
+  request: unknown;
+  blogDraft: {
+    title: string;
+    slug: string;
+    ingress: string;
+    body: string;
+    tags: string[];
+  };
+}) => {
+  return `
+Create a derived ${input.platform} post from this already-generated blog draft.
+
+Rules:
+- Use the blog draft as the single source of truth.
+- Do not introduce facts, claims, names, links, or examples that are not supported by the blog draft.
+- Compress and adapt, do not expand.
+- Keep the tone aligned with the blog draft.
+- The output must fit the requested platform and remain publishable on its own.
+- Do not include hashtags unless they were explicitly requested in the original request.
+- For X, keep the post concise and single-post sized.
+- For LinkedIn, allow a slightly longer reflective post, but keep it tighter than the blog draft.
+- Respect the intended publish targets from the original request when shaping the tone and density, but do not invent unsupported content.
+
+Original request:
+${JSON.stringify(input.request, null, 2)}
+
+Blog draft:
+${JSON.stringify(input.blogDraft, null, 2)}
+`.trim();
+};

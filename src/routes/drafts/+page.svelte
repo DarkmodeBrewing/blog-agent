@@ -5,6 +5,7 @@
 
   type PostStatus = 'synced' | 'draft' | 'approved' | 'committed' | 'rejected';
   type DesiredLength = 'short' | 'medium' | 'long';
+  type GenerationOutput = 'blog' | 'x' | 'linkedin';
 
   type PostRecord = {
     id: number;
@@ -34,7 +35,11 @@
     status: 'queued' | 'running' | 'completed' | 'failed';
     draftSlug: string | null;
     error: string | null;
+    bundleId: number | null;
+    primaryDraft: PostRecord | null;
+    bundleDrafts: PostRecord[];
     draft: PostRecord | null;
+    relatedDrafts: PostRecord[];
   };
 
   type GenerateResponse = {
@@ -85,6 +90,16 @@
     enabled: boolean;
   };
 
+  type FrontmatterPreferences = {
+    title: boolean;
+    slug: boolean;
+    ingress: boolean;
+    tags: boolean;
+    category: boolean;
+    date: boolean;
+    draft: boolean;
+  };
+
   type PublishResult = {
     target: PublishTarget;
     post: PostRecord;
@@ -108,6 +123,7 @@
   let appReadiness = $state<AppReadiness | null>(null);
   let publishTargets = $state<PublishTargetOption[]>([]);
   let editorRelatedPosts = $state<PostRecord[]>([]);
+  let requestedPublishTargets = $state<PublishTarget[]>(['markdown_download']);
   let loadingPosts = $state(false);
   let generating = $state(false);
   let generationJobId = $state<string | null>(null);
@@ -123,7 +139,17 @@
   let category = $state('');
   let requestedTags = $state('');
   let desiredLength = $state<DesiredLength>('medium');
+  let requestedOutputs = $state<GenerationOutput[]>(['blog']);
   let referencePostSlugs = $state<string[]>([]);
+  let frontmatterPreferences = $state<FrontmatterPreferences>({
+    title: true,
+    slug: true,
+    ingress: true,
+    tags: true,
+    category: false,
+    date: false,
+    draft: false
+  });
 
   let editorSlug = $state('');
   let editorTitle = $state('');
@@ -185,8 +211,34 @@
         selectedPublishTarget = (publishTargets.find((target) => target.enabled)?.id ??
           'markdown_download') as PublishTarget;
       }
+
+      requestedPublishTargets = publishTargets
+        .filter((target) => target.enabled && target.implemented)
+        .map((target) => target.id);
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : 'Failed to load publish targets';
+    }
+  };
+
+  const loadAppSettings = async () => {
+    try {
+      const data = await requestJson<{
+        settings: {
+          frontmatter: FrontmatterPreferences & { draftDefault: boolean };
+        };
+      }>(apiUrl('/api/settings/app'));
+
+      frontmatterPreferences = {
+        title: data.settings.frontmatter.title,
+        slug: data.settings.frontmatter.slug,
+        ingress: data.settings.frontmatter.ingress,
+        tags: data.settings.frontmatter.tags,
+        category: data.settings.frontmatter.category,
+        date: data.settings.frontmatter.date,
+        draft: data.settings.frontmatter.draft
+      };
+    } catch {
+      // Keep the local defaults when settings cannot be loaded yet.
     }
   };
 
@@ -212,6 +264,29 @@
       : [...referencePostSlugs, slug];
   };
 
+  const toggleOutput = (output: GenerationOutput) => {
+    if (output === 'blog') {
+      requestedOutputs = requestedOutputs.includes('blog')
+        ? ['blog']
+        : ['blog', ...requestedOutputs.filter((item) => item !== 'blog')];
+      return;
+    }
+
+    requestedOutputs = requestedOutputs.includes(output)
+      ? requestedOutputs.filter((item) => item !== output)
+      : [...requestedOutputs, output];
+
+    if (!requestedOutputs.includes('blog')) {
+      requestedOutputs = ['blog', ...requestedOutputs];
+    }
+  };
+
+  const toggleRequestedPublishTarget = (target: PublishTarget) => {
+    requestedPublishTargets = requestedPublishTargets.includes(target)
+      ? requestedPublishTargets.filter((item) => item !== target)
+      : [...requestedPublishTargets, target];
+  };
+
   const loadDraftIntoEditor = (post: PostRecord) => {
     editorSlug = post.slug;
     editorTitle = post.title;
@@ -234,10 +309,13 @@
       );
       generationJobStatus = data.job.status;
 
-      if (data.job.status === 'completed' && data.job.draft) {
+      if (data.job.status === 'completed' && data.job.primaryDraft) {
         clearGenerationPoll();
-        loadDraftIntoEditor(data.job.draft);
-        statusMessage = `Generated ${data.job.draft.slug}`;
+        loadDraftIntoEditor(data.job.primaryDraft);
+        statusMessage =
+          data.job.bundleDrafts.length > 1
+            ? `Generated ${data.job.bundleDrafts.length} drafts`
+            : `Generated ${data.job.primaryDraft.slug}`;
         generationJobId = null;
         generationJobStatus = null;
         generating = false;
@@ -287,6 +365,11 @@
         category: category || undefined,
         tags: splitCsv(requestedTags),
         desiredLength,
+        outputs: requestedOutputs,
+        publishTargets: requestedPublishTargets,
+        blogPreferences: {
+          frontmatter: frontmatterPreferences
+        },
         referencePostSlugs
       };
       const data = await requestJson<GenerateResponse>(
@@ -455,6 +538,7 @@
     void loadPosts();
     void loadReadiness();
     void loadPublishTargets();
+    void loadAppSettings();
 
     const events = new EventSource(apiUrl('/api/logs'));
 
@@ -603,6 +687,84 @@
             disabled={controlsDisabled}
           />
         </label>
+
+        <fieldset class="space-y-2">
+          <legend class="text-sm font-medium text-slate-700">Outputs</legend>
+          <label class="flex gap-2 text-sm">
+            <input checked={requestedOutputs.includes('blog')} disabled type="checkbox" />
+            <span>
+              <span class="block font-medium text-slate-900">Blog</span>
+              <span class="text-xs text-slate-500">Primary draft, always generated first.</span>
+            </span>
+          </label>
+          <label class="flex gap-2 text-sm">
+            <input
+              checked={requestedOutputs.includes('x')}
+              disabled={controlsDisabled}
+              onchange={() => toggleOutput('x')}
+              type="checkbox"
+            />
+            <span>
+              <span class="block font-medium text-slate-900">X</span>
+              <span class="text-xs text-slate-500">
+                Derived from the generated blog post, single-post sized.
+              </span>
+            </span>
+          </label>
+          <label class="flex gap-2 text-sm">
+            <input
+              checked={requestedOutputs.includes('linkedin')}
+              disabled={controlsDisabled}
+              onchange={() => toggleOutput('linkedin')}
+              type="checkbox"
+            />
+            <span>
+              <span class="block font-medium text-slate-900">LinkedIn</span>
+              <span class="text-xs text-slate-500">
+                Derived from the generated blog post, shorter than the blog draft.
+              </span>
+            </span>
+          </label>
+        </fieldset>
+
+        <fieldset class="space-y-2">
+          <legend class="text-sm font-medium text-slate-700">Planned Publish Targets</legend>
+          {#each publishTargets.filter((target) => target.implemented) as target (target.id)}
+            <label class="flex gap-2 text-sm">
+              <input
+                checked={requestedPublishTargets.includes(target.id)}
+                disabled={controlsDisabled || !target.enabled}
+                onchange={() => toggleRequestedPublishTarget(target.id)}
+                type="checkbox"
+              />
+              <span>
+                <span class="block font-medium text-slate-900">{target.label}</span>
+                <span class="text-xs text-slate-500">{target.description}</span>
+              </span>
+            </label>
+          {/each}
+        </fieldset>
+
+        <fieldset class="space-y-2">
+          <legend class="text-sm font-medium text-slate-700">Blog Frontmatter Preferences</legend>
+          <div class="grid gap-2 sm:grid-cols-2">
+            {#each Object.entries(frontmatterPreferences) as [key, enabled] (key)}
+              <label class="flex gap-2 text-sm">
+                <input
+                  checked={enabled}
+                  disabled={controlsDisabled}
+                  onchange={() =>
+                    (frontmatterPreferences = {
+                      ...frontmatterPreferences,
+                      [key]: !enabled
+                    })}
+                  type="checkbox"
+                />
+                <span class="capitalize">{key}</span>
+              </label>
+            {/each}
+          </div>
+        </fieldset>
 
         <p class="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">
           {referencePosts.length > 0 ? referencePosts.join(', ') : 'No reference posts selected.'}

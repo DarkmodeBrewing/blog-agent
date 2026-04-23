@@ -6,9 +6,9 @@ This document breaks the requested changes into implementation phases in the ord
 
 - [x] Phase 1: Settings domain refactor
 - [x] Phase 2: Application readiness and onboarding UX
-- [ ] Phase 3: Publishing architecture redesign
+- [x] Phase 3: Publishing architecture redesign
 - [x] Phase 4: Content model expansion
-- [ ] Phase 5: Generation workflow redesign
+- [x] Phase 5: Generation workflow redesign
 - [ ] Phase 6: Prompt and template refactor
 - [ ] Phase 7: API refactor
 - [ ] Phase 8: Database and Drizzle migration
@@ -106,7 +106,7 @@ Status: Completed
 
 ## Phase 4: Content Model Expansion
 
-Status: In progress
+Status: Completed
 
 - [x] Redesign the post data model to support multiple related content variants.
   - [x] Keep all generated items in one main table, but add grouping metadata.
@@ -133,25 +133,27 @@ Status: In progress
 
 ## Phase 5: Generation Workflow Redesign
 
-- Replace the single blog draft request schema with a multi-target generation schema.
-  - Topic and editorial guidance
-  - Selected content outputs
-  - Selected publish targets
-  - Optional reference posts
-  - Optional frontmatter preferences for blog output
-- Rework generation into ordered stages.
-  - Generate primary blog content first when selected.
-  - Generate derived social variants from the finalized primary content in the same job.
-- Add strict guardrails between primary and derived content.
-  - Derived content must be based on generated primary content, not on new divergent claims.
-  - Prompting should explicitly forbid introducing facts absent from the source draft.
-  - Record provenance for each derived variant.
-- Expand OpenAI result schemas.
-  - Blog content schema
-  - Social short-form schema
-  - Common generation notes and source/provenance fields
-- Persist each generated variant separately, linked through bundle/group IDs.
-- Update job tracking to store bundle progress and per-variant progress.
+- Status: Completed
+
+- [x] Replace the single blog draft request schema with a multi-target generation schema.
+  - [x] Topic and editorial guidance
+  - [x] Selected content outputs
+  - [x] Selected publish targets
+  - [x] Optional reference posts
+  - [x] Optional frontmatter preferences for blog output
+- [x] Rework generation into ordered stages.
+  - [x] Generate primary blog content first when selected.
+  - [x] Generate derived social variants from the finalized primary content in the same job.
+- [x] Add strict guardrails between primary and derived content.
+  - [x] Derived content must be based on generated primary content, not on new divergent claims.
+  - [x] Prompting explicitly forbids introducing facts absent from the source draft.
+  - [x] Record provenance for each derived variant.
+- [x] Expand OpenAI result schemas.
+  - [x] Blog content schema
+  - [x] Social short-form schema
+  - [x] Common generation notes and source/provenance fields
+- [x] Persist each generated variant separately, linked through bundle/group IDs.
+- [x] Update job tracking to store bundle progress and sibling variant results in the current job flow.
 
 ## Phase 6: Prompt and Template Refactor
 

@@ -1,11 +1,30 @@
 import { z } from 'zod/v4';
 
 export const BlogLengthSchema = z.enum(['short', 'medium', 'long']);
+export const GenerationOutputSchema = z.enum(['blog', 'x', 'linkedin']);
+export const PublishTargetSchema = z.enum([
+  'markdown_download',
+  'markdown_disk_export',
+  'github_repo',
+  'cms_contentful',
+  'social_x',
+  'social_linkedin'
+]);
 export const BlogSlugSchema = z
   .string()
   .trim()
   .toLowerCase()
   .regex(/^[a-z0-9-]+$/);
+
+export const BlogFrontmatterPreferenceSchema = z.object({
+  title: z.boolean().optional(),
+  slug: z.boolean().optional(),
+  ingress: z.boolean().optional(),
+  tags: z.boolean().optional(),
+  category: z.boolean().optional(),
+  date: z.boolean().optional(),
+  draft: z.boolean().optional()
+});
 
 export const DraftRequestSchema = z.object({
   topic: z.string().min(10),
@@ -14,6 +33,13 @@ export const DraftRequestSchema = z.object({
   category: z.string().optional(),
   tags: z.array(z.string()).optional(),
   desiredLength: BlogLengthSchema,
+  outputs: z.array(GenerationOutputSchema).min(1).default(['blog']),
+  publishTargets: z.array(PublishTargetSchema).default(['markdown_download']),
+  blogPreferences: z
+    .object({
+      frontmatter: BlogFrontmatterPreferenceSchema.optional()
+    })
+    .optional(),
   referencePostSlugs: z.array(z.string()).optional()
 });
 
@@ -30,6 +56,14 @@ export const GeneratedDraftSchema = z.object({
 });
 
 export type GeneratedDraft = z.infer<typeof GeneratedDraftSchema>;
+
+export const GeneratedSocialVariantSchema = z.object({
+  platform: z.enum(['x', 'linkedin']),
+  body: z.string().min(20),
+  generationNotes: z.string()
+});
+
+export type GeneratedSocialVariant = z.infer<typeof GeneratedSocialVariantSchema>;
 
 export const DraftReviewSchema = z.object({
   status: z.enum(['draft', 'approved', 'rejected', 'published']),
