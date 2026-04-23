@@ -6,9 +6,7 @@ import { hashText, logWorkflow } from './workflow-log';
 import {
   insertContentBundle,
   insertGenerationRun,
-  insertPostPublication,
   insertPostStatusEvent,
-  lockPostById,
   selectChildPostRows,
   selectPublicationRowsForPost,
   selectPostRowById,

@@ -34,7 +34,7 @@
     <img width="75" src={favicon} alt="Blog-agent" />
     <nav aria-label="Primary" class="flex items-center gap-4 text-lg">
       <a class="hover:underline" href={resolve('/')}>Home</a>
-      <a class="hover:underline" href={resolve('/drafts')}>Drafts</a>
+      <a class="hover:underline" href={resolve('/drafts')}>Generate post</a>
       <a class="hover:underline" href={resolve('/posts')}>Posts</a>
       <a
         aria-label="Settings"

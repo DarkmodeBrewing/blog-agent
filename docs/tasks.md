@@ -12,7 +12,7 @@ This document breaks the requested changes into implementation phases in the ord
 - [x] Phase 6: Prompt and template refactor
 - [x] Phase 7: API refactor
 - [x] Phase 8: Database and Drizzle migration
-- [ ] Phase 9: UI refactor
+- [x] Phase 9: UI refactor
 - [ ] Phase 10: Accessibility, usability, and responsive pass
 - [ ] Phase 11: Logging and observability adjustments
 - [ ] Phase 12: Cleanup and documentation
@@ -215,33 +215,35 @@ Status: Completed
 
 ## Phase 9: UI Refactor
 
-- Refactor header navigation.
-  - Remove dashboard link.
-  - Rename `Drafts` to `Generate post`.
-  - Replace text `Settings` link with a settings icon button.
-- Move dashboard content onto the home page under the leading text.
-  - Token usage summary
-  - Recent activity
-  - Other operational overview cards
-- Replace current posts split view with a full-page listing route.
-  - Show relevant columns such as title, content type, editorial status, publish status, source, updated time, target summary.
-  - Add filtering and sorting.
-- Add dedicated post detail route.
-  - Preview-first view.
-  - Explicit `Edit` action to enter form mode.
-  - Render grouped variants together when the post belongs to a bundle.
-  - Prevent editing published content.
-  - Add `Create copy` flow for published items.
+- Status: Completed
+
+- [x] Refactor header navigation.
+  - [x] Remove dashboard link.
+  - [x] Rename `Drafts` to `Generate post`.
+  - [x] Replace text `Settings` link with a settings icon button.
+- [x] Move dashboard content onto the home page under the leading text.
+  - [x] Token usage summary
+  - [x] Recent activity
+  - [x] Other operational overview cards
+- [x] Replace current posts split view with a full-page listing route.
+  - [x] Show relevant columns such as title, content type, editorial status, publish status, source, updated time, target summary.
+  - [x] Add filtering and sorting.
+- [x] Add dedicated post detail route.
+  - [x] Preview-first view.
+  - [x] Explicit `Edit` action to enter form mode.
+  - [x] Render grouped variants together when the post belongs to a bundle.
+  - [x] Prevent editing published content.
+  - [x] Add `Create copy` flow for published items.
 - Refactor generate route into an editor-centered workflow.
-  - Generation form on one side or in a setup panel
-  - Generated outputs loaded into dedicated preview/edit views
-  - Variant navigation for blog/social siblings
-- Refactor settings page into grouped configuration sections.
-  - App setup
-  - Models
-  - Prompts
-  - Publishing targets
-  - Frontmatter template
+  - [x] Generation form on one side or in a setup panel
+  - [x] Generated outputs loaded into dedicated preview/edit views
+  - [x] Variant navigation for blog/social siblings
+- [x] Refactor settings page into grouped configuration sections.
+  - [x] App setup
+  - [x] Models
+  - [x] Prompts
+  - [x] Publishing targets
+  - [x] Frontmatter template
 
 ## Phase 10: Accessibility, Usability, and Responsive Pass
 

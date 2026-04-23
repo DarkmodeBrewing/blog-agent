@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { apiUrl, requestJson } from '$lib/client/request-json';
 
   type PostStatus = 'synced' | 'draft' | 'approved' | 'committed' | 'rejected';
@@ -29,12 +30,6 @@
     isEditable: boolean;
   };
 
-  type PostDetailResponse = {
-    post: PostRecord;
-    relatedPosts: PostRecord[];
-    bundle: PostBundle | null;
-  };
-
   type PostBundle = {
     key: string;
     bundleId: number | null;
@@ -54,19 +49,17 @@
 
   let bundles = $state<PostBundle[]>([]);
   let appReadiness = $state<AppReadiness | null>(null);
-  let selectedBundle = $state<PostBundle | null>(null);
   let selectedStatus = $state<PostStatus | 'all'>('all');
-  let selectedSlug = $state<string | null>(null);
+  let selectedContentType = $state<PostRecord['contentType'] | 'all'>('all');
   let loading = $state(false);
   let syncing = $state(false);
   let statusMessage = $state('');
   let errorMessage = $state('');
 
-  let selectedPost = $derived(
-    selectedBundle?.posts.find((post) => post.slug === selectedSlug) ??
-      selectedBundle?.primaryPost ??
-      bundles[0]?.primaryPost ??
-      null
+  let visibleBundles = $derived(
+    bundles.filter((bundle) =>
+      selectedContentType === 'all' ? true : bundle.contentTypes.includes(selectedContentType)
+    )
   );
 
   const loadPosts = async () => {
@@ -76,13 +69,6 @@
       const query = selectedStatus === 'all' ? '' : `?status=${selectedStatus}`;
       const data = await requestJson<{ bundles: PostBundle[] }>(apiUrl(`/api/posts${query}`));
       bundles = data.bundles;
-
-      if (
-        selectedSlug &&
-        !bundles.some((bundle) => bundle.posts.some((post) => post.slug === selectedSlug))
-      ) {
-        selectedSlug = bundles[0]?.primaryPost.slug ?? null;
-      }
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : 'Failed to load posts';
     } finally {
@@ -98,22 +84,6 @@
       appReadiness = data.readiness;
     } catch {
       appReadiness = null;
-    }
-  };
-
-  const loadSelectedPostDetail = async () => {
-    if (!selectedSlug) {
-      selectedBundle = null;
-      return;
-    }
-
-    try {
-      const data = await requestJson<PostDetailResponse>(
-        apiUrl(`/api/posts/${encodeURIComponent(selectedSlug)}`)
-      );
-      selectedBundle = data.bundle;
-    } catch {
-      selectedBundle = null;
     }
   };
 
@@ -138,10 +108,6 @@
     void loadPosts();
     void loadReadiness();
   });
-
-  $effect(() => {
-    void loadSelectedPostDetail();
-  });
 </script>
 
 <svelte:head>
@@ -157,13 +123,27 @@
       </div>
 
       <div class="flex flex-wrap items-center gap-2">
+        <label class="sr-only" for="post-status-filter">Status</label>
         <select
+          id="post-status-filter"
           class="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
           bind:value={selectedStatus}
         >
           {#each statuses as status (status)}
             <option value={status}>{status}</option>
           {/each}
+        </select>
+        <label class="sr-only" for="post-type-filter">Content type</label>
+        <select
+          id="post-type-filter"
+          class="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+          bind:value={selectedContentType}
+        >
+          <option value="all">all types</option>
+          <option value="blog">blog</option>
+          <option value="x">x</option>
+          <option value="linkedin">linkedin</option>
+          <option value="generic">generic</option>
         </select>
         <button
           class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
@@ -198,120 +178,77 @@
       </p>
     {/if}
 
-    <div class="grid min-h-[34rem] lg:grid-cols-[24rem_minmax(0,1fr)]">
-      <div class="border-b border-slate-200 lg:border-r lg:border-b-0">
-        {#if loading}
-          <p class="p-4 text-sm text-slate-500">Loading posts...</p>
-        {:else if bundles.length === 0}
-          <p class="p-4 text-sm text-slate-500">No posts found.</p>
-        {:else}
-          <div class="max-h-[42rem] overflow-auto">
-            {#each bundles as bundle (bundle.key)}
-              <button
-                class={`block w-full border-b border-slate-100 px-4 py-3 text-left hover:bg-slate-50 ${selectedBundle?.key === bundle.key || selectedPost?.id === bundle.primaryPost.id ? 'bg-slate-100' : ''}`}
-                type="button"
-                onclick={() => (selectedSlug = bundle.primaryPost.slug)}
-              >
-                <span class="block truncate text-sm font-medium text-slate-950">
-                  {bundle.primaryPost.title}
-                </span>
-                <span class="mt-1 flex items-center gap-2 text-xs text-slate-500">
-                  <span class="rounded bg-slate-200 px-1.5 py-0.5">{bundle.primaryPost.status}</span
+    {#if loading}
+      <p class="p-4 text-sm text-slate-500">Loading posts...</p>
+    {:else if visibleBundles.length === 0}
+      <p class="p-4 text-sm text-slate-500">No posts found.</p>
+    {:else}
+      <div class="overflow-x-auto">
+        <table class="w-full min-w-[70rem] text-left text-sm">
+          <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+            <tr>
+              <th class="px-4 py-3">Title</th>
+              <th class="px-4 py-3">Types</th>
+              <th class="px-4 py-3">Editorial</th>
+              <th class="px-4 py-3">Published</th>
+              <th class="px-4 py-3">Source</th>
+              <th class="px-4 py-3">Updated</th>
+              <th class="px-4 py-3">Variants</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each visibleBundles as bundle (bundle.key)}
+              <tr class="border-t border-slate-100 align-top">
+                <td class="px-4 py-3">
+                  <a
+                    class="font-medium text-slate-950 hover:underline"
+                    href={resolve(`/posts/${encodeURIComponent(bundle.primaryPost.slug)}`)}
                   >
-                  {#if bundle.publishedTargets.length > 0}
-                    <span class="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-800"
-                      >published</span
-                    >
+                    {bundle.primaryPost.title}
+                  </a>
+                  <div class="mt-1 text-xs text-slate-500">{bundle.primaryPost.slug}</div>
+                </td>
+                <td class="px-4 py-3">
+                  <div class="flex flex-wrap gap-1.5">
+                    {#each bundle.contentTypes as contentType (contentType)}
+                      <span class="rounded bg-slate-100 px-2 py-1 text-xs text-slate-700">
+                        {contentType}
+                      </span>
+                    {/each}
+                  </div>
+                </td>
+                <td class="px-4 py-3">
+                  <div class="flex flex-wrap gap-1.5">
+                    {#each bundle.editorialStatuses as status (status)}
+                      <span class="rounded bg-slate-100 px-2 py-1 text-xs text-slate-700">
+                        {status}
+                      </span>
+                    {/each}
+                  </div>
+                </td>
+                <td class="px-4 py-3">
+                  {#if bundle.publishedTargets.length === 0}
+                    <span class="text-slate-500">None</span>
+                  {:else}
+                    <div class="flex flex-wrap gap-1.5">
+                      {#each bundle.publishedTargets as target (target)}
+                        <span class="rounded bg-emerald-50 px-2 py-1 text-xs text-emerald-800">
+                          {target}
+                        </span>
+                      {/each}
+                    </div>
                   {/if}
-                  {#if bundle.posts.length > 1}
-                    <span class="rounded bg-slate-100 px-1.5 py-0.5"
-                      >{bundle.posts.length} variants</span
-                    >
-                  {/if}
-                  <span class="truncate">{bundle.primaryPost.slug}</span>
-                </span>
-              </button>
+                </td>
+                <td class="px-4 py-3 text-slate-700">{bundle.primaryPost.source}</td>
+                <td class="px-4 py-3 text-slate-700">
+                  {new Date(bundle.updatedAt).toLocaleString()}
+                </td>
+                <td class="px-4 py-3 text-slate-700">{bundle.posts.length}</td>
+              </tr>
             {/each}
-          </div>
-        {/if}
+          </tbody>
+        </table>
       </div>
-
-      <article class="p-4">
-        {#if selectedPost}
-          <div class="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 class="text-xl font-semibold text-slate-950">{selectedPost.title}</h2>
-              <p class="mt-1 text-sm text-slate-500">{selectedPost.slug}</p>
-            </div>
-            <span class="rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
-              {selectedPost.status}
-            </span>
-          </div>
-
-          <div class="mt-3 flex flex-wrap gap-2 text-xs">
-            <span class="rounded bg-slate-100 px-2 py-1 text-slate-700">
-              {selectedPost.contentType}
-            </span>
-            <span class="rounded bg-slate-100 px-2 py-1 text-slate-700">
-              {selectedPost.variantRole}
-            </span>
-            {#if selectedPost.publicationSummary.publishedTargets.length > 0}
-              {#each selectedPost.publicationSummary.publishedTargets as target (target)}
-                <span class="rounded bg-emerald-50 px-2 py-1 text-emerald-800">{target}</span>
-              {/each}
-            {/if}
-          </div>
-
-          {#if selectedPost.ingress}
-            <p class="mt-4 rounded-md bg-slate-50 p-3 text-sm leading-6 text-slate-700">
-              {selectedPost.ingress}
-            </p>
-          {/if}
-
-          {#if selectedPost.lockedAt}
-            <p
-              class="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"
-            >
-              This post is locked because it has been published. Create a copy to continue editing.
-            </p>
-          {/if}
-
-          {#if selectedBundle && selectedBundle.posts.length > 1}
-            <section class="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
-              <h3 class="text-sm font-semibold text-slate-900">Bundle Variants</h3>
-              <div class="mt-3 space-y-2">
-                {#each selectedBundle.posts.filter((related) => related.slug !== selectedPost.slug) as related (related.id)}
-                  <button
-                    class="block w-full rounded border border-slate-200 bg-white px-3 py-2 text-left text-sm hover:bg-slate-100"
-                    type="button"
-                    onclick={() => (selectedSlug = related.slug)}
-                  >
-                    <span class="block font-medium text-slate-900">{related.title}</span>
-                    <span class="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
-                      <span>{related.contentType}</span>
-                      <span>{related.variantRole}</span>
-                      <span>{related.status}</span>
-                    </span>
-                  </button>
-                {/each}
-              </div>
-            </section>
-          {/if}
-
-          <div class="mt-4 flex flex-wrap gap-2">
-            {#each selectedPost.tags as tag (tag)}
-              <span class="rounded bg-cyan-50 px-2 py-1 text-xs font-medium text-cyan-800"
-                >{tag}</span
-              >
-            {/each}
-          </div>
-
-          <pre
-            class="mt-4 max-h-[32rem] overflow-auto rounded-md bg-slate-950 p-4 text-sm leading-6 whitespace-pre-wrap text-slate-100">{selectedPost.body}</pre>
-        {:else}
-          <p class="text-sm text-slate-500">Select a post.</p>
-        {/if}
-      </article>
-    </div>
+    {/if}
   </section>
 </div>
