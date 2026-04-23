@@ -7,17 +7,16 @@ import {
   getMarkdownExportSettings
 } from './app-settings';
 import { getOctokit } from './clients';
-import { getPostBySlug, type PostRecord, upsertPost } from './post-library';
+import {
+  getPostBySlug,
+  recordPostPublication,
+  type PostRecord,
+  type PublishTarget as PostPublishTarget
+} from './post-library';
 import { getGitHubRepoConfig } from './get-posts-from-repo';
 import { logWorkflow } from './workflow-log';
 
-export type PublishTarget =
-  | 'markdown_download'
-  | 'markdown_disk_export'
-  | 'github_repo'
-  | 'cms_contentful'
-  | 'social_x'
-  | 'social_linkedin';
+export type PublishTarget = PostPublishTarget;
 
 export type PublishTargetDefinition = {
   id: PublishTarget;
@@ -131,35 +130,17 @@ export const renderPostAsMarkdown = (post: PostRecord) => {
   };
 };
 
-const markPostPublished = (
-  post: PostRecord,
-  input?: {
-    githubPath?: string | null;
-    githubSha?: string | null;
-    source?: PostRecord['source'];
-    statusNotes?: string;
-  }
-) => {
-  return upsertPost({
-    slug: post.slug,
-    title: post.title,
-    ingress: post.ingress,
-    body: post.body,
-    frontmatter: post.frontmatter,
-    tags: post.tags,
-    status: 'committed',
-    githubPath: input?.githubPath ?? post.githubPath,
-    githubSha: input?.githubSha ?? post.githubSha,
-    source: input?.source ?? post.source,
-    statusNotes: input?.statusNotes ?? 'Published through adapter layer'
-  }).post;
-};
-
 const publishMarkdownDownload = (post: PostRecord): PublishResult => {
   const artifact = renderPostAsMarkdown(post);
-  const publishedPost = markPostPublished(post, {
-    statusNotes: 'Exported as Markdown download'
+  const publishedPost = recordPostPublication(post.slug, {
+    target: 'markdown_download',
+    status: 'published',
+    artifact
   });
+
+  if (!publishedPost) {
+    throw new Error(`Post not found while recording publication: ${post.slug}`);
+  }
 
   logWorkflow({
     level: 'info',
@@ -195,9 +176,16 @@ const publishMarkdownDiskExport = (post: PostRecord): PublishResult => {
   mkdirSync(dirname(filePath), { recursive: true });
   writeFileSync(filePath, artifact.content, 'utf-8');
 
-  const publishedPost = markPostPublished(post, {
-    statusNotes: 'Exported to server disk'
+  const publishedPost = recordPostPublication(post.slug, {
+    target: 'markdown_disk_export',
+    status: 'published',
+    artifact,
+    filePath
   });
+
+  if (!publishedPost) {
+    throw new Error(`Post not found while recording publication: ${post.slug}`);
+  }
 
   logWorkflow({
     level: 'info',
@@ -266,12 +254,19 @@ const publishGitHubRepo = async (post: PostRecord): Promise<PublishResult> => {
     sha: currentSha
   });
 
-  const publishedPost = markPostPublished(post, {
-    githubPath: path,
-    githubSha: result.data.content?.sha ?? currentSha ?? null,
-    source: 'github',
-    statusNotes: 'Published to GitHub'
+  const publishedPost = recordPostPublication(post.slug, {
+    target: 'github_repo',
+    status: 'published',
+    artifact,
+    remoteUrl: result.data.content?.html_url ?? null,
+    filePath: path,
+    commitSha: result.data.commit.sha,
+    externalId: result.data.content?.sha ?? currentSha ?? null
   });
+
+  if (!publishedPost) {
+    throw new Error(`Post not found while recording publication: ${post.slug}`);
+  }
 
   const remoteUrl = result.data.content?.html_url ?? null;
 
@@ -282,7 +277,7 @@ const publishGitHubRepo = async (post: PostRecord): Promise<PublishResult> => {
       slug: publishedPost.slug,
       target: 'github_repo',
       path,
-      sha: publishedPost.githubSha,
+      sha: result.data.content?.sha ?? currentSha ?? null,
       commitSha: result.data.commit.sha,
       remoteUrl
     }

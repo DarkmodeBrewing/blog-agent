@@ -1,59 +1,172 @@
+import { randomUUID } from 'node:crypto';
 import matter from 'gray-matter';
 import { desc, eq, sql } from 'drizzle-orm';
 import { getDatabase } from './database';
-import { generationRuns, posts, postStatusEvents } from './db/schema';
+import {
+  contentBundles,
+  generationRuns,
+  postPublications,
+  posts,
+  postStatusEvents
+} from './db/schema';
 import { getGitHubBlogPostFiles, getGitHubRepoConfig } from './get-posts-from-repo';
 import type { DraftRequest, GeneratedDraft } from '../../openai/model';
 import { hashText, logWorkflow } from './workflow-log';
 
 export type PostStatus = 'synced' | 'draft' | 'approved' | 'committed' | 'rejected';
 export type PostSource = 'github' | 'generated' | 'manual';
+export type PostContentType = 'blog' | 'x' | 'linkedin' | 'instagram' | 'generic';
+export type PostVariantRole = 'primary' | 'derived' | 'standalone';
+export type PublicationStatus = 'not_published' | 'published' | 'failed';
+export type PublishTarget =
+  | 'markdown_download'
+  | 'markdown_disk_export'
+  | 'github_repo'
+  | 'cms_contentful'
+  | 'social_x'
+  | 'social_linkedin';
+
+export type PostPublicationRecord = {
+  id: number;
+  postId: number;
+  target: PublishTarget;
+  status: PublicationStatus;
+  externalId: string | null;
+  remoteUrl: string | null;
+  filePath: string | null;
+  commitSha: string | null;
+  artifact: Record<string, unknown> | null;
+  error: string | null;
+  createdAt: string;
+  publishedAt: string | null;
+  updatedAt: string;
+};
+
+export type PublicationSummary = {
+  total: number;
+  publishedTargets: PublishTarget[];
+  failedTargets: PublishTarget[];
+  latestPublishedAt: string | null;
+  latestTarget: PublishTarget | null;
+};
 
 export type PostRecord = {
   id: number;
+  bundleId: number | null;
+  parentPostId: number | null;
   slug: string;
   title: string;
   ingress: string | null;
   body: string;
   frontmatter: Record<string, unknown>;
   tags: string[];
+  contentType: PostContentType;
+  variantRole: PostVariantRole;
   status: PostStatus;
   githubPath: string | null;
   githubSha: string | null;
   source: PostSource;
+  lockedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  publications: PostPublicationRecord[];
+  publicationSummary: PublicationSummary;
+  isPublished: boolean;
+  isEditable: boolean;
 };
 
 type UpsertPostInput = {
+  bundleId?: number | null;
+  parentPostId?: number | null;
   slug: string;
   title: string;
   ingress?: string | null;
   body: string;
   frontmatter?: Record<string, unknown>;
   tags?: string[];
+  contentType?: PostContentType;
+  variantRole?: PostVariantRole;
   status: PostStatus;
   githubPath?: string | null;
   githubSha?: string | null;
   source: PostSource;
+  lockedAt?: string | null;
   statusNotes?: string;
 };
 
-const mapPostRow = (row: typeof posts.$inferSelect): PostRecord => ({
+const mapPublicationRow = (row: typeof postPublications.$inferSelect): PostPublicationRecord => ({
   id: row.id,
-  slug: row.slug,
-  title: row.title,
-  ingress: row.ingress,
-  body: row.body,
-  frontmatter: JSON.parse(row.frontmatterJson) as Record<string, unknown>,
-  tags: JSON.parse(row.tagsJson) as string[],
+  postId: row.postId,
+  target: row.target,
   status: row.status,
-  githubPath: row.githubPath,
-  githubSha: row.githubSha,
-  source: row.source,
+  externalId: row.externalId,
+  remoteUrl: row.remoteUrl,
+  filePath: row.filePath,
+  commitSha: row.commitSha,
+  artifact: row.artifactJson ? (JSON.parse(row.artifactJson) as Record<string, unknown>) : null,
+  error: row.error,
   createdAt: row.createdAt,
+  publishedAt: row.publishedAt,
   updatedAt: row.updatedAt
 });
+
+const listPostPublications = (postId: number) => {
+  return getDatabase()
+    .select()
+    .from(postPublications)
+    .where(eq(postPublications.postId, postId))
+    .orderBy(desc(postPublications.updatedAt))
+    .all()
+    .map(mapPublicationRow);
+};
+
+const getPublicationSummary = (publications: PostPublicationRecord[]): PublicationSummary => {
+  const published = publications.filter((publication) => publication.status === 'published');
+  const failed = publications.filter((publication) => publication.status === 'failed');
+  const latestPublished = [...published].sort((a, b) =>
+    (b.publishedAt ?? '').localeCompare(a.publishedAt ?? '')
+  )[0];
+
+  return {
+    total: publications.length,
+    publishedTargets: [...new Set(published.map((publication) => publication.target))],
+    failedTargets: [...new Set(failed.map((publication) => publication.target))],
+    latestPublishedAt: latestPublished?.publishedAt ?? null,
+    latestTarget: latestPublished?.target ?? null
+  };
+};
+
+const mapPostRow = (row: typeof posts.$inferSelect): PostRecord => {
+  const publications = listPostPublications(row.id);
+  const publicationSummary = getPublicationSummary(publications);
+  const isPublished = publicationSummary.publishedTargets.length > 0;
+  const isEditable = !row.lockedAt && !isPublished;
+
+  return {
+    id: row.id,
+    bundleId: row.bundleId,
+    parentPostId: row.parentPostId,
+    slug: row.slug,
+    title: row.title,
+    ingress: row.ingress,
+    body: row.body,
+    frontmatter: JSON.parse(row.frontmatterJson) as Record<string, unknown>,
+    tags: JSON.parse(row.tagsJson) as string[],
+    contentType: row.contentType,
+    variantRole: row.variantRole,
+    status: row.status,
+    githubPath: row.githubPath,
+    githubSha: row.githubSha,
+    source: row.source,
+    lockedAt: row.lockedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    publications,
+    publicationSummary,
+    isPublished,
+    isEditable
+  };
+};
 
 const getStringField = (data: Record<string, unknown>, key: string) => {
   const value = data[key];
@@ -89,21 +202,91 @@ export const getPostBySlug = (slug: string) => {
   return row ? mapPostRow(row) : null;
 };
 
+export const getPostsByBundleId = (bundleId: number, excludeSlug?: string) => {
+  const rows = getDatabase()
+    .select()
+    .from(posts)
+    .where(eq(posts.bundleId, bundleId))
+    .orderBy(desc(posts.updatedAt))
+    .all();
+
+  return rows.map(mapPostRow).filter((post) => (excludeSlug ? post.slug !== excludeSlug : true));
+};
+
+export const getRelatedPosts = (slug: string) => {
+  const post = getPostBySlug(slug);
+
+  if (!post) {
+    return [];
+  }
+
+  if (post.bundleId) {
+    return getPostsByBundleId(post.bundleId, post.slug);
+  }
+
+  const related: PostRecord[] = [];
+
+  if (post.parentPostId) {
+    const parentRow = getDatabase()
+      .select()
+      .from(posts)
+      .where(eq(posts.id, post.parentPostId))
+      .get();
+
+    if (parentRow) {
+      related.push(mapPostRow(parentRow));
+    }
+  }
+
+  const childRows = getDatabase()
+    .select()
+    .from(posts)
+    .where(eq(posts.parentPostId, post.id))
+    .orderBy(desc(posts.updatedAt))
+    .all();
+
+  related.push(...childRows.map(mapPostRow));
+
+  return related.filter((relatedPost, index, collection) => {
+    return (
+      relatedPost.slug !== post.slug &&
+      collection.findIndex((candidate) => candidate.slug === relatedPost.slug) === index
+    );
+  });
+};
+
+export const createContentBundle = () => {
+  const key = randomUUID();
+  const result = getDatabase()
+    .insert(contentBundles)
+    .values({
+      key
+    })
+    .run();
+
+  return Number(result.lastInsertRowid);
+};
+
 export const upsertPost = (input: UpsertPostInput) => {
   const database = getDatabase();
   const existing = getPostBySlug(input.slug);
 
   const values = {
+    bundleId: input.bundleId ?? existing?.bundleId ?? null,
+    parentPostId: input.parentPostId ?? existing?.parentPostId ?? null,
     slug: input.slug,
     title: input.title,
     ingress: input.ingress ?? null,
     body: input.body,
     frontmatterJson: JSON.stringify(input.frontmatter ?? {}),
     tagsJson: JSON.stringify(input.tags ?? []),
+    contentType: input.contentType ?? existing?.contentType ?? 'blog',
+    variantRole: input.variantRole ?? existing?.variantRole ?? 'standalone',
     status: input.status,
     githubPath: input.githubPath ?? null,
     githubSha: input.githubSha ?? null,
-    source: input.source
+    source: input.source,
+    lockedAt: input.lockedAt ?? existing?.lockedAt ?? null
   };
 
   const result = database
@@ -112,15 +295,20 @@ export const upsertPost = (input: UpsertPostInput) => {
     .onConflictDoUpdate({
       target: posts.slug,
       set: {
+        bundleId: values.bundleId,
+        parentPostId: values.parentPostId,
         title: values.title,
         ingress: values.ingress,
         body: values.body,
         frontmatterJson: values.frontmatterJson,
         tagsJson: values.tagsJson,
+        contentType: values.contentType,
+        variantRole: values.variantRole,
         status: values.status,
         githubPath: values.githubPath,
         githubSha: values.githubSha,
         source: values.source,
+        lockedAt: values.lockedAt,
         updatedAt: sql`datetime('now')`
       }
     })
@@ -156,7 +344,9 @@ export const createDraftFromGeneration = (
   model: string,
   prompt: string
 ) => {
+  const bundleId = createContentBundle();
   const { post } = upsertPost({
+    bundleId,
     slug: draft.slug,
     title: draft.title,
     ingress: draft.ingress,
@@ -167,6 +357,8 @@ export const createDraftFromGeneration = (
       tags: draft.tags
     },
     tags: draft.tags,
+    contentType: 'blog',
+    variantRole: 'primary',
     status: 'draft',
     source: 'generated',
     statusNotes: 'Generated by OpenAI'
@@ -208,6 +400,10 @@ export const updatePostStatus = (slug: string, status: PostStatus, notes?: strin
 
   if (!post) {
     return null;
+  }
+
+  if (!post.isEditable) {
+    throw new Error('Published posts are locked. Create a copy to continue editing.');
   }
 
   const updatedPost = upsertPost({
@@ -253,6 +449,10 @@ export const updatePostContent = (
     return null;
   }
 
+  if (!post.isEditable) {
+    throw new Error('Published posts are locked. Create a copy to continue editing.');
+  }
+
   const updatedPost = upsertPost({
     slug: post.slug,
     title: input.title,
@@ -286,7 +486,8 @@ export const updatePostContent = (
       changedFields,
       previousBodyLength: post.body.length,
       newBodyLength: input.body.length,
-      bodyLengthDelta: input.body.length - post.body.length
+      bodyLengthDelta: input.body.length - post.body.length,
+      locked: Boolean(post.lockedAt)
     }
   });
 
@@ -340,6 +541,8 @@ export const syncPostsFromGitHub = async () => {
       body: parsed.content.trim(),
       frontmatter,
       tags,
+      contentType: 'blog',
+      variantRole: 'standalone',
       status: 'synced',
       githubPath: file.path,
       githubSha: file.sha,
@@ -383,4 +586,101 @@ export const syncPostsFromGitHub = async () => {
   return {
     synced
   };
+};
+
+export const recordPostPublication = (
+  slug: string,
+  input: {
+    target: PublishTarget;
+    status: PublicationStatus;
+    externalId?: string | null;
+    remoteUrl?: string | null;
+    filePath?: string | null;
+    commitSha?: string | null;
+    artifact?: Record<string, unknown> | null;
+    error?: string | null;
+  }
+) => {
+  const post = getPostBySlug(slug);
+
+  if (!post) {
+    return null;
+  }
+
+  getDatabase()
+    .insert(postPublications)
+    .values({
+      postId: post.id,
+      target: input.target,
+      status: input.status,
+      externalId: input.externalId ?? null,
+      remoteUrl: input.remoteUrl ?? null,
+      filePath: input.filePath ?? null,
+      commitSha: input.commitSha ?? null,
+      artifactJson: input.artifact ? JSON.stringify(input.artifact) : null,
+      error: input.error ?? null,
+      publishedAt: input.status === 'published' ? new Date().toISOString() : null,
+      updatedAt: new Date().toISOString()
+    })
+    .run();
+
+  if (input.status === 'published') {
+    getDatabase()
+      .update(posts)
+      .set({
+        lockedAt: sql`coalesce(${posts.lockedAt}, datetime('now'))`,
+        updatedAt: sql`datetime('now')`
+      })
+      .where(eq(posts.id, post.id))
+      .run();
+  }
+
+  return getPostBySlug(slug);
+};
+
+export const createEditableCopy = (slug: string) => {
+  const post = getPostBySlug(slug);
+
+  if (!post) {
+    return null;
+  }
+
+  const copySlugBase = `${post.slug}-copy`;
+  let nextSlug = copySlugBase;
+  let counter = 2;
+
+  while (getPostBySlug(nextSlug)) {
+    nextSlug = `${copySlugBase}-${counter}`;
+    counter += 1;
+  }
+
+  const copy = upsertPost({
+    bundleId: post.bundleId,
+    parentPostId: post.id,
+    slug: nextSlug,
+    title: `${post.title} (Copy)`,
+    ingress: post.ingress,
+    body: post.body,
+    frontmatter: post.frontmatter,
+    tags: post.tags,
+    contentType: post.contentType,
+    variantRole: post.variantRole === 'primary' ? 'derived' : post.variantRole,
+    status: 'draft',
+    source: 'manual',
+    lockedAt: null,
+    statusNotes: `Created editable copy from ${post.slug}`
+  }).post;
+
+  logWorkflow({
+    level: 'info',
+    message: 'post.copy.created',
+    details: {
+      sourceSlug: post.slug,
+      copySlug: copy.slug,
+      sourcePostId: post.id,
+      copyPostId: copy.id
+    }
+  });
+
+  return copy;
 };

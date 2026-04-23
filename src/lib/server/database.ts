@@ -33,6 +33,13 @@ export const getSqliteDatabase = () => {
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
 
+      CREATE TABLE IF NOT EXISTS content_bundles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        key TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
       CREATE TABLE IF NOT EXISTS posts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         slug TEXT NOT NULL UNIQUE,
@@ -99,6 +106,24 @@ export const getSqliteDatabase = () => {
         FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS post_publications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        post_id INTEGER NOT NULL,
+        target TEXT NOT NULL,
+        status TEXT NOT NULL,
+        external_id TEXT,
+        remote_url TEXT,
+        file_path TEXT,
+        commit_sha TEXT,
+        artifact_json TEXT,
+        error TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        published_at TEXT,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_content_bundles_key ON content_bundles(key);
       CREATE INDEX IF NOT EXISTS idx_posts_status ON posts(status);
       CREATE INDEX IF NOT EXISTS idx_posts_source ON posts(source);
       CREATE INDEX IF NOT EXISTS idx_generation_runs_post_id ON generation_runs(post_id);
@@ -111,6 +136,37 @@ export const getSqliteDatabase = () => {
       CREATE INDEX IF NOT EXISTS idx_token_usage_events_session_id
         ON token_usage_events(session_id);
       CREATE INDEX IF NOT EXISTS idx_post_status_events_post_id ON post_status_events(post_id);
+      CREATE INDEX IF NOT EXISTS idx_post_publications_post_id ON post_publications(post_id);
+      CREATE INDEX IF NOT EXISTS idx_post_publications_target ON post_publications(target);
+      CREATE INDEX IF NOT EXISTS idx_post_publications_status ON post_publications(status);
+    `);
+
+    const postColumns = sqliteDatabase.prepare(`PRAGMA table_info('posts')`).all() as Array<{
+      name: string;
+    }>;
+    const postColumnNames = new Set(postColumns.map((column) => column.name));
+    const addPostColumn = (name: string, definition: string) => {
+      if (!postColumnNames.has(name)) {
+        sqliteDatabase!.exec(`ALTER TABLE posts ADD COLUMN ${definition}`);
+      }
+    };
+
+    addPostColumn(
+      'bundle_id',
+      'bundle_id INTEGER REFERENCES content_bundles(id) ON DELETE SET NULL'
+    );
+    addPostColumn(
+      'parent_post_id',
+      'parent_post_id INTEGER REFERENCES posts(id) ON DELETE SET NULL'
+    );
+    addPostColumn('content_type', "content_type TEXT NOT NULL DEFAULT 'blog'");
+    addPostColumn('variant_role', "variant_role TEXT NOT NULL DEFAULT 'standalone'");
+    addPostColumn('locked_at', 'locked_at TEXT');
+
+    sqliteDatabase.exec(`
+      CREATE INDEX IF NOT EXISTS idx_posts_bundle_id ON posts(bundle_id);
+      CREATE INDEX IF NOT EXISTS idx_posts_parent_post_id ON posts(parent_post_id);
+      CREATE INDEX IF NOT EXISTS idx_posts_content_type ON posts(content_type);
     `);
   }
 

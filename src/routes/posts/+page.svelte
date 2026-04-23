@@ -5,32 +5,44 @@
 
   type PostRecord = {
     id: number;
+    bundleId: number | null;
     slug: string;
     title: string;
     ingress: string | null;
     body: string;
     tags: string[];
     status: PostStatus;
+    contentType: 'blog' | 'x' | 'linkedin' | 'instagram' | 'generic';
+    variantRole: 'primary' | 'derived' | 'standalone';
     source: 'github' | 'generated' | 'manual';
     githubPath: string | null;
+    lockedAt: string | null;
     updatedAt: string;
+    publicationSummary: {
+      total: number;
+      publishedTargets: string[];
+      failedTargets: string[];
+      latestPublishedAt: string | null;
+      latestTarget: string | null;
+    };
+    isPublished: boolean;
+    isEditable: boolean;
+  };
+
+  type PostDetailResponse = {
+    post: PostRecord;
+    relatedPosts: PostRecord[];
   };
 
   type AppReadiness = {
     readyForGitHubSync: boolean;
   };
 
-  const statuses: Array<PostStatus | 'all'> = [
-    'all',
-    'draft',
-    'approved',
-    'committed',
-    'synced',
-    'rejected'
-  ];
+  const statuses: Array<PostStatus | 'all'> = ['all', 'draft', 'approved', 'synced', 'rejected'];
 
   let posts = $state<PostRecord[]>([]);
   let appReadiness = $state<AppReadiness | null>(null);
+  let relatedPosts = $state<PostRecord[]>([]);
   let selectedStatus = $state<PostStatus | 'all'>('all');
   let selectedSlug = $state<string | null>(null);
   let loading = $state(false);
@@ -69,6 +81,22 @@
     }
   };
 
+  const loadSelectedPostDetail = async () => {
+    if (!selectedSlug) {
+      relatedPosts = [];
+      return;
+    }
+
+    try {
+      const data = await requestJson<PostDetailResponse>(
+        apiUrl(`/api/posts/${encodeURIComponent(selectedSlug)}`)
+      );
+      relatedPosts = data.relatedPosts;
+    } catch {
+      relatedPosts = [];
+    }
+  };
+
   const syncPosts = async () => {
     syncing = true;
     statusMessage = '';
@@ -89,6 +117,10 @@
   $effect(() => {
     void loadPosts();
     void loadReadiness();
+  });
+
+  $effect(() => {
+    void loadSelectedPostDetail();
   });
 </script>
 
@@ -163,6 +195,11 @@
                 <span class="block truncate text-sm font-medium text-slate-950">{post.title}</span>
                 <span class="mt-1 flex items-center gap-2 text-xs text-slate-500">
                   <span class="rounded bg-slate-200 px-1.5 py-0.5">{post.status}</span>
+                  {#if post.isPublished}
+                    <span class="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-800"
+                      >published</span
+                    >
+                  {/if}
                   <span class="truncate">{post.slug}</span>
                 </span>
               </button>
@@ -183,10 +220,54 @@
             </span>
           </div>
 
+          <div class="mt-3 flex flex-wrap gap-2 text-xs">
+            <span class="rounded bg-slate-100 px-2 py-1 text-slate-700">
+              {selectedPost.contentType}
+            </span>
+            <span class="rounded bg-slate-100 px-2 py-1 text-slate-700">
+              {selectedPost.variantRole}
+            </span>
+            {#if selectedPost.publicationSummary.publishedTargets.length > 0}
+              {#each selectedPost.publicationSummary.publishedTargets as target (target)}
+                <span class="rounded bg-emerald-50 px-2 py-1 text-emerald-800">{target}</span>
+              {/each}
+            {/if}
+          </div>
+
           {#if selectedPost.ingress}
             <p class="mt-4 rounded-md bg-slate-50 p-3 text-sm leading-6 text-slate-700">
               {selectedPost.ingress}
             </p>
+          {/if}
+
+          {#if selectedPost.lockedAt}
+            <p
+              class="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"
+            >
+              This post is locked because it has been published. Create a copy to continue editing.
+            </p>
+          {/if}
+
+          {#if relatedPosts.length > 0}
+            <section class="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
+              <h3 class="text-sm font-semibold text-slate-900">Related Variants</h3>
+              <div class="mt-3 space-y-2">
+                {#each relatedPosts as related (related.id)}
+                  <button
+                    class="block w-full rounded border border-slate-200 bg-white px-3 py-2 text-left text-sm hover:bg-slate-100"
+                    type="button"
+                    onclick={() => (selectedSlug = related.slug)}
+                  >
+                    <span class="block font-medium text-slate-900">{related.title}</span>
+                    <span class="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                      <span>{related.contentType}</span>
+                      <span>{related.variantRole}</span>
+                      <span>{related.status}</span>
+                    </span>
+                  </button>
+                {/each}
+              </div>
+            </section>
           {/if}
 
           <div class="mt-4 flex flex-wrap gap-2">

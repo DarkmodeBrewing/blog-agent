@@ -7,7 +7,7 @@ This document breaks the requested changes into implementation phases in the ord
 - [x] Phase 1: Settings domain refactor
 - [x] Phase 2: Application readiness and onboarding UX
 - [ ] Phase 3: Publishing architecture redesign
-- [ ] Phase 4: Content model expansion
+- [x] Phase 4: Content model expansion
 - [ ] Phase 5: Generation workflow redesign
 - [ ] Phase 6: Prompt and template refactor
 - [ ] Phase 7: API refactor
@@ -80,7 +80,7 @@ This document breaks the requested changes into implementation phases in the ord
 
 ## Phase 3: Publishing Architecture Redesign
 
-Status: In progress
+Status: Completed
 
 - [x] Introduce a publish adapter abstraction.
   - [x] `markdown_download`
@@ -106,29 +106,30 @@ Status: In progress
 
 ## Phase 4: Content Model Expansion
 
-- Redesign the post data model to support multiple related content variants.
-  - Keep all generated items in one main table, but add grouping.
-- Add a parent generation group or content bundle concept.
-  - Example: one campaign/request produces:
-    - blog post
-    - x post
-    - linkedin post
-- Add per-item content metadata.
-  - Content type: `blog`, `x`, `linkedin`, future `instagram`, etc.
-  - Variant role: `primary`, `derived`
-  - Parent item ID or bundle ID
-  - Publish target type
-  - Publish status per target
-  - External publish metadata such as remote ID, remote URL, publish timestamps
+Status: In progress
+
+- [x] Redesign the post data model to support multiple related content variants.
+  - [x] Keep all generated items in one main table, but add grouping metadata.
+- [x] Add a parent generation group or content bundle concept.
+  - [x] Introduced `content_bundles` as a first persistence layer for grouped outputs.
+- [x] Add per-item content metadata.
+  - [x] Content type: `blog`, `x`, `linkedin`, future `instagram`, etc.
+  - [x] Variant role: `primary`, `derived`, `standalone`
+  - [x] Parent item ID or bundle ID
+  - [x] Publish status per target via `post_publications`
+  - [x] External publish metadata such as remote URL, file path, commit SHA, and artifact payload
 - Expand status model.
   - Separate editorial status from publishing status.
   - Example editorial states: `draft`, `approved`, `rejected`, `published_locked`.
   - Example delivery states: `not_published`, `queued`, `published`, `failed`.
-- Preserve independent publishability.
-  - A blog draft and its derived social drafts must be publishable separately.
-- Add copy/duplicate workflow metadata.
-  - Published items become non-editable.
-  - User can create an editable copy from a published item.
+- [x] Expand status model.
+  - [x] Separate editorial status from publishing status in persistence and server logic.
+  - [x] Publication records now drive locked/published behavior instead of relying on `committed`.
+- [x] Preserve independent publishability.
+  - [x] Publication records are stored per post and per target.
+- [x] Add copy/duplicate workflow metadata.
+  - [x] Published items become non-editable in the current UI.
+  - [x] User can create an editable copy from a published item.
 
 ## Phase 5: Generation Workflow Redesign
 

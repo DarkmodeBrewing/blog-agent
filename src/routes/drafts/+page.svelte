@@ -8,12 +8,25 @@
 
   type PostRecord = {
     id: number;
+    bundleId: number | null;
     slug: string;
     title: string;
     ingress: string | null;
     body: string;
     tags: string[];
     status: PostStatus;
+    contentType: 'blog' | 'x' | 'linkedin' | 'instagram' | 'generic';
+    variantRole: 'primary' | 'derived' | 'standalone';
+    lockedAt: string | null;
+    publicationSummary: {
+      total: number;
+      publishedTargets: string[];
+      failedTargets: string[];
+      latestPublishedAt: string | null;
+      latestTarget: string | null;
+    };
+    isPublished: boolean;
+    isEditable: boolean;
   };
 
   type GenerationJob = {
@@ -85,10 +98,16 @@
     commitSha?: string;
   };
 
+  type PostDetailResponse = {
+    post: PostRecord;
+    relatedPosts: PostRecord[];
+  };
+
   let posts = $state<PostRecord[]>([]);
   let logs = $state<LogEvent[]>([]);
   let appReadiness = $state<AppReadiness | null>(null);
   let publishTargets = $state<PublishTargetOption[]>([]);
+  let editorRelatedPosts = $state<PostRecord[]>([]);
   let loadingPosts = $state(false);
   let generating = $state(false);
   let generationJobId = $state<string | null>(null);
@@ -116,7 +135,9 @@
   let referencePosts = $derived(
     posts.filter((post) => referencePostSlugs.includes(post.slug)).map((post) => post.title)
   );
+  let editorPost = $derived(posts.find((post) => post.slug === editorSlug) ?? null);
   let hasDraft = $derived(Boolean(editorSlug));
+  let editorLocked = $derived(Boolean(editorPost && !editorPost.isEditable));
   let generationBlocked = $derived(appReadiness ? !appReadiness.readyForGeneration : false);
   let controlsDisabled = $derived(generating || saving || publishing || generationBlocked);
 
@@ -166,6 +187,22 @@
       }
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : 'Failed to load publish targets';
+    }
+  };
+
+  const loadEditorRelations = async () => {
+    if (!editorSlug) {
+      editorRelatedPosts = [];
+      return;
+    }
+
+    try {
+      const data = await requestJson<PostDetailResponse>(
+        apiUrl(`/api/posts/${encodeURIComponent(editorSlug)}`)
+      );
+      editorRelatedPosts = data.relatedPosts;
+    } catch {
+      editorRelatedPosts = [];
     }
   };
 
@@ -273,6 +310,10 @@
 
   const saveDraft = async () => {
     if (!editorSlug) return;
+    if (editorLocked) {
+      errorMessage = 'Published posts are locked. Create a copy to continue editing.';
+      return;
+    }
 
     saving = true;
     statusMessage = '';
@@ -300,6 +341,10 @@
 
   const updateStatus = async (status: PostStatus) => {
     if (!editorSlug) return;
+    if (editorLocked) {
+      errorMessage = 'Published posts are locked. Create a copy to continue editing.';
+      return;
+    }
 
     await saveDraft();
 
@@ -387,6 +432,25 @@
     }
   };
 
+  const createCopy = async (slug = editorSlug) => {
+    if (!slug) return;
+
+    try {
+      const data = await requestJson<{ post: PostRecord }>(
+        apiUrl(`/api/posts/${encodeURIComponent(slug)}/copy`),
+        {
+          method: 'POST'
+        }
+      );
+
+      statusMessage = `${slug} copied to ${data.post.slug}`;
+      await loadPosts();
+      loadDraftIntoEditor(data.post);
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Copy failed';
+    }
+  };
+
   onMount(() => {
     void loadPosts();
     void loadReadiness();
@@ -407,6 +471,10 @@
   onDestroy(() => {
     clearGenerationPoll();
     logs = [];
+  });
+
+  $effect(() => {
+    void loadEditorRelations();
   });
 </script>
 
@@ -596,7 +664,7 @@
                       <span class="text-xs text-slate-500">{post.status} · {post.slug}</span>
                     </span>
                   </label>
-                  {#if post.status === 'draft' || post.status === 'approved'}
+                  {#if post.isEditable}
                     <button
                       class="mt-2 rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700"
                       disabled={controlsDisabled}
@@ -604,6 +672,15 @@
                       onclick={() => loadDraftIntoEditor(post)}
                     >
                       Edit
+                    </button>
+                  {:else if post.isPublished}
+                    <button
+                      class="mt-2 rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700"
+                      disabled={controlsDisabled}
+                      type="button"
+                      onclick={() => void createCopy(post.slug)}
+                    >
+                      Create copy
                     </button>
                   {/if}
                 </div>
@@ -637,7 +714,7 @@
           </label>
           <button
             class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
-            disabled={!hasDraft || controlsDisabled}
+            disabled={!hasDraft || controlsDisabled || editorLocked}
             type="button"
             onclick={() => void saveDraft()}
           >
@@ -645,7 +722,7 @@
           </button>
           <button
             class="rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-            disabled={!hasDraft || controlsDisabled}
+            disabled={!hasDraft || controlsDisabled || editorLocked}
             type="button"
             onclick={() => void updateStatus('approved')}
           >
@@ -653,7 +730,7 @@
           </button>
           <button
             class="rounded-md bg-red-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-            disabled={!hasDraft || controlsDisabled}
+            disabled={!hasDraft || controlsDisabled || editorLocked}
             type="button"
             onclick={() => void updateStatus('rejected')}
           >
@@ -679,12 +756,55 @@
       </div>
 
       <div class="space-y-4 p-4">
+        {#if editorLocked}
+          <div
+            class="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+          >
+            <p class="font-medium">This post is locked because it has been published.</p>
+            <p class="mt-1">
+              Create a copy to continue editing without changing the published version.
+            </p>
+          </div>
+        {/if}
+
+        {#if editorPost && editorPost.publicationSummary.publishedTargets.length > 0}
+          <div class="flex flex-wrap gap-2">
+            {#each editorPost.publicationSummary.publishedTargets as target (target)}
+              <span class="rounded bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800">
+                Published: {target}
+              </span>
+            {/each}
+          </div>
+        {/if}
+
+        {#if editorRelatedPosts.length > 0}
+          <section class="rounded-md border border-slate-200 bg-slate-50 p-4">
+            <h3 class="text-sm font-semibold text-slate-900">Related Variants</h3>
+            <div class="mt-3 space-y-2">
+              {#each editorRelatedPosts as related (related.id)}
+                <button
+                  class="block w-full rounded border border-slate-200 bg-white px-3 py-2 text-left text-sm hover:bg-slate-100"
+                  type="button"
+                  onclick={() => loadDraftIntoEditor(related)}
+                >
+                  <span class="block font-medium text-slate-900">{related.title}</span>
+                  <span class="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                    <span>{related.contentType}</span>
+                    <span>{related.variantRole}</span>
+                    <span>{related.status}</span>
+                  </span>
+                </button>
+              {/each}
+            </div>
+          </section>
+        {/if}
+
         <label class="block">
           <span class="text-sm font-medium text-slate-700">Title</span>
           <input
             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={editorTitle}
-            disabled={!hasDraft || controlsDisabled}
+            disabled={!hasDraft || controlsDisabled || editorLocked}
           />
         </label>
 
@@ -693,7 +813,7 @@
           <textarea
             class="mt-1 min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={editorIngress}
-            disabled={!hasDraft || controlsDisabled}
+            disabled={!hasDraft || controlsDisabled || editorLocked}
           ></textarea>
         </label>
 
@@ -702,7 +822,7 @@
           <input
             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={editorTags}
-            disabled={!hasDraft || controlsDisabled}
+            disabled={!hasDraft || controlsDisabled || editorLocked}
           />
         </label>
 
@@ -711,7 +831,7 @@
           <textarea
             class="mt-1 min-h-136 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm leading-6 outline-none focus:border-slate-900"
             bind:value={editorBody}
-            disabled={!hasDraft || controlsDisabled}
+            disabled={!hasDraft || controlsDisabled || editorLocked}
             spellcheck="false"
           ></textarea>
         </label>
