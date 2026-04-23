@@ -2,6 +2,21 @@
 
 This document breaks the requested changes into implementation phases in the order that reduces churn and keeps the application usable while it evolves.
 
+## Progress
+
+- [x] Phase 1: Settings domain refactor
+- [x] Phase 2: Application readiness and onboarding UX
+- [ ] Phase 3: Publishing architecture redesign
+- [ ] Phase 4: Content model expansion
+- [ ] Phase 5: Generation workflow redesign
+- [ ] Phase 6: Prompt and template refactor
+- [ ] Phase 7: API refactor
+- [ ] Phase 8: Database and Drizzle migration
+- [ ] Phase 9: UI refactor
+- [ ] Phase 10: Accessibility, usability, and responsive pass
+- [ ] Phase 11: Logging and observability adjustments
+- [ ] Phase 12: Cleanup and documentation
+
 ## Phase 0: Decisions and Constraints
 
 - Keep HTTP Basic Auth environment-based for now.
@@ -65,26 +80,29 @@ This document breaks the requested changes into implementation phases in the ord
 
 ## Phase 3: Publishing Architecture Redesign
 
-- Introduce a publish adapter abstraction.
-  - `markdown_export`
-  - `github_repo`
-  - future `cms_*`
-  - future `social_*`
+Status: In progress
+
+- [x] Introduce a publish adapter abstraction.
+  - [x] `markdown_download`
+  - [x] `markdown_disk_export`
+  - [x] `github_repo`
+  - [x] placeholder definitions for future `cms_*` and `social_*`
 - Split generation target from publish target.
   - Generation target answers "what content variants should be drafted?"
   - Publish target answers "where can each variant be sent?"
-- Make plain Markdown export the default target for blog content.
-  - Support export with optional frontmatter.
-  - Support configurable frontmatter template per blog export target.
-- Move GitHub publishing behind an optional adapter.
-  - Enable in settings.
-  - Require token, owner, repo, branch, path when enabled.
-  - Rework sync to depend on enabled GitHub source configuration, not global env.
-- Define adapter capability metadata.
-  - Which content types a target accepts.
-  - Whether it supports draft publish, update, delete, preview URL, returned external ID.
-- Add placeholder CMS adapter interfaces without implementing vendor-specific behavior yet.
-  - Contentful and generic headless CMS can fit later without changing route/UI contracts.
+- [x] Make plain Markdown export the default target for blog content.
+  - [x] Support export with optional frontmatter.
+  - [x] Support configurable frontmatter template for Markdown export.
+- [x] Move GitHub publishing behind an optional adapter.
+  - [x] Enable in settings.
+  - [x] Require token, owner, repo, branch, path when enabled.
+  - [x] Rework sync to depend on enabled GitHub source configuration, not global env.
+- [x] Define adapter capability metadata.
+  - [x] Expose publish target list to the UI and API.
+- [x] Add placeholder CMS/social adapter interfaces without implementing vendor-specific behavior yet.
+  - [x] Contentful and generic social adapters can fit later without changing route/UI contracts.
+- [ ] Split generation target from publish target.
+  - This depends on the Phase 4 and 5 data model/workflow redesign.
 
 ## Phase 4: Content Model Expansion
 

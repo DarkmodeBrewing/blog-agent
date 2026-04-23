@@ -2,13 +2,40 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { BlogSlugSchema } from '../../../../../openai/model';
 import { getReadiness } from '$lib/server/app-settings';
-import { publishApprovedDraft } from '$lib/server/post-library';
+import {
+  isPublishTarget,
+  isPublishTargetReady,
+  listPublishTargets,
+  publishPost,
+  type PublishTarget
+} from '$lib/server/publishing';
 import { getErrorMessage, logWorkflow } from '$lib/server/workflow-log';
 
-export const POST: RequestHandler = async ({ params }) => {
+export const POST: RequestHandler = async ({ params, request }) => {
+  const parsedSlug = BlogSlugSchema.safeParse(params.slug);
+
+  if (!parsedSlug.success) {
+    return json({ error: 'Invalid slug', issues: parsedSlug.error.issues }, { status: 400 });
+  }
+
+  const requestBody = (await request.json().catch(() => undefined)) as
+    | { target?: string }
+    | undefined;
+  const target = requestBody?.target ?? 'markdown_download';
+
+  if (!isPublishTarget(target)) {
+    return json(
+      {
+        error: 'Invalid publish target',
+        availableTargets: listPublishTargets()
+      },
+      { status: 400 }
+    );
+  }
+
   const readiness = getReadiness();
 
-  if (!readiness.readyForGitHubPublishing) {
+  if (target === 'github_repo' && !readiness.readyForGitHubPublishing) {
     return json(
       {
         error: 'GitHub publishing settings are incomplete',
@@ -18,26 +45,31 @@ export const POST: RequestHandler = async ({ params }) => {
     );
   }
 
-  const parsedSlug = BlogSlugSchema.safeParse(params.slug);
-
-  if (!parsedSlug.success) {
-    return json({ error: 'Invalid slug', issues: parsedSlug.error.issues }, { status: 400 });
+  if (!isPublishTargetReady(target)) {
+    return json(
+      {
+        error: `Publish target is not ready: ${target}`,
+        availableTargets: listPublishTargets()
+      },
+      { status: 409 }
+    );
   }
 
   try {
-    const post = await publishApprovedDraft(parsedSlug.data);
+    const result = await publishPost(parsedSlug.data, target as PublishTarget);
 
-    if (!post) {
+    if (!result) {
       return json({ error: 'Post not found' }, { status: 404 });
     }
 
-    return json({ post });
+    return json({ result });
   } catch (cause) {
     logWorkflow({
       level: 'error',
       message: 'post.publish.failed',
       details: {
         slug: parsedSlug.data,
+        target,
         error: getErrorMessage(cause)
       }
     });

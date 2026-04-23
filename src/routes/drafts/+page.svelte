@@ -54,14 +54,47 @@
     issues: ReadinessIssue[];
   };
 
+  type PublishTarget =
+    | 'markdown_download'
+    | 'markdown_disk_export'
+    | 'github_repo'
+    | 'cms_contentful'
+    | 'social_x'
+    | 'social_linkedin';
+
+  type PublishTargetOption = {
+    id: PublishTarget;
+    label: string;
+    description: string;
+    implemented: boolean;
+    requiresConfiguration: boolean;
+    kind: 'markdown' | 'repository' | 'cms' | 'social';
+    enabled: boolean;
+  };
+
+  type PublishResult = {
+    target: PublishTarget;
+    post: PostRecord;
+    artifact?: {
+      filename: string;
+      content: string;
+      contentType: string;
+    };
+    filePath?: string;
+    remoteUrl?: string;
+    commitSha?: string;
+  };
+
   let posts = $state<PostRecord[]>([]);
   let logs = $state<LogEvent[]>([]);
   let appReadiness = $state<AppReadiness | null>(null);
+  let publishTargets = $state<PublishTargetOption[]>([]);
   let loadingPosts = $state(false);
   let generating = $state(false);
   let generationJobId = $state<string | null>(null);
   let generationJobStatus = $state<GenerationJob['status'] | null>(null);
   let saving = $state(false);
+  let publishing = $state(false);
   let statusMessage = $state('');
   let errorMessage = $state('');
 
@@ -78,13 +111,14 @@
   let editorIngress = $state('');
   let editorTags = $state('');
   let editorBody = $state('');
+  let selectedPublishTarget = $state<PublishTarget>('markdown_download');
 
   let referencePosts = $derived(
     posts.filter((post) => referencePostSlugs.includes(post.slug)).map((post) => post.title)
   );
   let hasDraft = $derived(Boolean(editorSlug));
   let generationBlocked = $derived(appReadiness ? !appReadiness.readyForGeneration : false);
-  let controlsDisabled = $derived(generating || saving || generationBlocked);
+  let controlsDisabled = $derived(generating || saving || publishing || generationBlocked);
 
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -116,6 +150,22 @@
       appReadiness = data.readiness;
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : 'Failed to load application status';
+    }
+  };
+
+  const loadPublishTargets = async () => {
+    try {
+      const data = await requestJson<{ targets: PublishTargetOption[] }>(
+        apiUrl('/api/publish-targets')
+      );
+      publishTargets = data.targets;
+
+      if (!publishTargets.some((target) => target.id === selectedPublishTarget && target.enabled)) {
+        selectedPublishTarget = (publishTargets.find((target) => target.enabled)?.id ??
+          'markdown_download') as PublishTarget;
+      }
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Failed to load publish targets';
     }
   };
 
@@ -270,21 +320,77 @@
     if (!editorSlug) return;
 
     await saveDraft();
+    publishing = true;
+    statusMessage = '';
+    errorMessage = '';
 
     try {
-      await requestJson(apiUrl(`/api/posts/${encodeURIComponent(editorSlug)}/publish`), {
-        method: 'POST'
-      });
-      statusMessage = `${editorSlug} published`;
+      const data = await requestJson<{ result: PublishResult }>(
+        apiUrl(`/api/posts/${encodeURIComponent(editorSlug)}/publish`),
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ target: selectedPublishTarget })
+        }
+      );
+
+      if (data.result.artifact && selectedPublishTarget === 'markdown_download') {
+        const blob = new Blob([data.result.artifact.content], {
+          type: data.result.artifact.contentType
+        });
+        const downloadUrl = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = downloadUrl;
+        anchor.download = data.result.artifact.filename;
+        document.body.append(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(downloadUrl);
+      }
+
+      statusMessage =
+        selectedPublishTarget === 'markdown_disk_export' && data.result.filePath
+          ? `${editorSlug} exported to ${data.result.filePath}`
+          : selectedPublishTarget === 'github_repo' && data.result.remoteUrl
+            ? `${editorSlug} published to GitHub`
+            : `${editorSlug} published via ${selectedPublishTarget}`;
       await loadPosts();
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : 'Publish failed';
+    } finally {
+      publishing = false;
+    }
+  };
+
+  const copyMarkdownToClipboard = async () => {
+    if (!editorSlug) return;
+
+    try {
+      const data = await requestJson<{ result: PublishResult }>(
+        apiUrl(`/api/posts/${encodeURIComponent(editorSlug)}/publish`),
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ target: 'markdown_download' })
+        }
+      );
+
+      if (!data.result.artifact) {
+        throw new Error('No Markdown artifact returned');
+      }
+
+      await navigator.clipboard.writeText(data.result.artifact.content);
+      statusMessage = `${editorSlug} copied to clipboard`;
+      await loadPosts();
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Copy failed';
     }
   };
 
   onMount(() => {
     void loadPosts();
     void loadReadiness();
+    void loadPublishTargets();
 
     const events = new EventSource(apiUrl('/api/logs'));
 
@@ -514,7 +620,21 @@
           <h2 class="text-lg font-semibold text-slate-950">Editor</h2>
           <p class="text-sm text-slate-500">{editorSlug || 'Generate or select a draft.'}</p>
         </div>
-        <div class="flex flex-wrap gap-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <label class="min-w-52">
+            <span class="sr-only">Publish target</span>
+            <select
+              bind:value={selectedPublishTarget}
+              class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+              disabled={!hasDraft || controlsDisabled}
+            >
+              {#each publishTargets.filter((target) => target.implemented) as target (target.id)}
+                <option disabled={!target.enabled} value={target.id}>
+                  {target.label}{target.enabled ? '' : ' (Unavailable)'}
+                </option>
+              {/each}
+            </select>
+          </label>
           <button
             class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
             disabled={!hasDraft || controlsDisabled}
@@ -540,12 +660,20 @@
             Reject
           </button>
           <button
+            class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+            disabled={!hasDraft || controlsDisabled}
+            type="button"
+            onclick={() => void copyMarkdownToClipboard()}
+          >
+            Copy Markdown
+          </button>
+          <button
             class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
             disabled={!hasDraft || controlsDisabled}
             type="button"
             onclick={() => void publishDraft()}
           >
-            Publish
+            {publishing ? 'Publishing...' : 'Publish'}
           </button>
         </div>
       </div>

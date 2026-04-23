@@ -4,7 +4,6 @@ import { getDatabase } from './database';
 import { generationRuns, posts, postStatusEvents } from './db/schema';
 import { getGitHubBlogPostFiles, getGitHubRepoConfig } from './get-posts-from-repo';
 import type { DraftRequest, GeneratedDraft } from '../../openai/model';
-import { getOctokit } from './clients';
 import { hashText, logWorkflow } from './workflow-log';
 
 export type PostStatus = 'synced' | 'draft' | 'approved' | 'committed' | 'rejected';
@@ -384,95 +383,4 @@ export const syncPostsFromGitHub = async () => {
   return {
     synced
   };
-};
-
-export const publishApprovedDraft = async (slug: string) => {
-  const post = getPostBySlug(slug);
-
-  if (!post) {
-    return null;
-  }
-
-  if (post.status !== 'approved') {
-    throw new Error(`Post must be approved before publishing. Current status: ${post.status}`);
-  }
-
-  const octokit = getOctokit();
-  const config = getGitHubRepoConfig();
-  const path = post.githubPath ?? `${config.blogPostPath}/${post.slug}.md`;
-
-  logWorkflow({
-    level: 'info',
-    message: 'post.publish.started',
-    details: {
-      slug: post.slug,
-      title: post.title,
-      path,
-      repo: `${config.owner}/${config.repo}`,
-      ref: config.ref
-    }
-  });
-
-  const content = matter.stringify(post.body, {
-    ...post.frontmatter,
-    title: post.title,
-    ingress: post.ingress ?? undefined,
-    tags: post.tags
-  });
-
-  let currentSha = post.githubSha ?? undefined;
-
-  if (!currentSha) {
-    try {
-      const existing = await octokit.rest.repos.getContent({
-        owner: config.owner,
-        repo: config.repo,
-        path,
-        ref: config.ref
-      });
-
-      if (!Array.isArray(existing.data) && existing.data.type === 'file') {
-        currentSha = existing.data.sha;
-      }
-    } catch {
-      currentSha = undefined;
-    }
-  }
-
-  const result = await octokit.rest.repos.createOrUpdateFileContents({
-    owner: config.owner,
-    repo: config.repo,
-    path,
-    branch: config.ref,
-    message: `Publish blog post: ${post.title}`,
-    content: Buffer.from(content).toString('base64'),
-    sha: currentSha
-  });
-
-  const publishedPost = upsertPost({
-    slug: post.slug,
-    title: post.title,
-    ingress: post.ingress,
-    body: post.body,
-    frontmatter: post.frontmatter,
-    tags: post.tags,
-    status: 'committed',
-    githubPath: path,
-    githubSha: result.data.content?.sha ?? currentSha ?? null,
-    source: 'github',
-    statusNotes: 'Published to GitHub'
-  }).post;
-
-  logWorkflow({
-    level: 'info',
-    message: 'post.publish.completed',
-    details: {
-      slug: publishedPost.slug,
-      path,
-      sha: publishedPost.githubSha,
-      commitSha: result.data.commit.sha
-    }
-  });
-
-  return publishedPost;
 };
