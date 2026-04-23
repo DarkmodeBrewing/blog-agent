@@ -1,8 +1,9 @@
 import { zodResponsesFunction, zodTextFormat } from 'openai/helpers/zod';
 import { randomUUID } from 'node:crypto';
 import {
-  GeneratedDraftSchema,
+  createGeneratedDraftSchema,
   GeneratedSocialVariantSchema,
+  type BlogFrontmatterPreference,
   type DraftRequest,
   type GeneratedDraft,
   type GeneratedSocialVariant,
@@ -21,7 +22,6 @@ import { recordTokenUsage } from './token-usage';
 import { getErrorMessage, hashText, logWorkflow } from './workflow-log';
 
 const maxToolIterations = 3;
-const draftTextFormat = zodTextFormat(GeneratedDraftSchema, 'blog_draft');
 const socialVariantTextFormat = zodTextFormat(
   GeneratedSocialVariantSchema,
   'derived_social_variant'
@@ -102,6 +102,10 @@ const generatePrimaryBlogDraft = async (
   context: { sessionId: string; model: string; instructions: string }
 ): Promise<GeneratedDraft | null> => {
   const input = buildPrimaryDraftInput(draftRequest);
+  const draftSchema = createGeneratedDraftSchema(
+    (draftRequest.blogPreferences?.frontmatter ?? {}) as BlogFrontmatterPreference
+  );
+  const draftTextFormat = zodTextFormat(draftSchema, 'blog_draft');
   const allowedReferenceSlugs = draftRequest.referencePostSlugs ?? [];
   const tools: DraftTool[] = [];
 
@@ -254,7 +258,7 @@ const generateDerivedVariant = async (
       slug: primary.slug,
       ingress: primary.ingress,
       body: primary.body,
-      tags: primary.tags
+      tags: primary.tags ?? []
     }
   });
 

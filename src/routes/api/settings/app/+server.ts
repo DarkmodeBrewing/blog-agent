@@ -8,6 +8,16 @@ import {
   updateAppSettings
 } from '$lib/server/app-settings';
 
+const FrontmatterFieldSchema = z.enum([
+  'title',
+  'slug',
+  'ingress',
+  'tags',
+  'category',
+  'date',
+  'draft'
+]);
+
 const SettingsUpdateSchema = z.object({
   openai: z.object({
     apiKey: z.string().optional(),
@@ -37,7 +47,12 @@ const SettingsUpdateSchema = z.object({
     category: z.boolean(),
     date: z.boolean(),
     draft: z.boolean(),
-    draftDefault: z.boolean()
+    defaults: z.object({
+      category: z.string(),
+      date: z.string(),
+      draft: z.boolean()
+    }),
+    order: z.array(FrontmatterFieldSchema)
   })
 });
 

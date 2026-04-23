@@ -1,7 +1,11 @@
 export {
+  getPromptTemplates,
   getSelectedModel,
+  logSettingsFailure,
+  resetPromptTemplates,
   getSystemPrompt,
   resetSystemPrompt,
+  setPromptTemplates,
   setSystemPrompt
 } from './app-settings';
 

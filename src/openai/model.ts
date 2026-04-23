@@ -26,6 +26,8 @@ export const BlogFrontmatterPreferenceSchema = z.object({
   draft: z.boolean().optional()
 });
 
+export type BlogFrontmatterPreference = z.infer<typeof BlogFrontmatterPreferenceSchema>;
+
 export const DraftRequestSchema = z.object({
   topic: z.string().min(10),
   summary: z.string().optional(),
@@ -48,14 +50,27 @@ export type DraftRequest = z.infer<typeof DraftRequestSchema>;
 export const GeneratedDraftSchema = z.object({
   title: z.string().min(8),
   slug: BlogSlugSchema,
-  tags: z.array(z.string()).min(1),
   body: z.string().min(50),
-  ingress: z.string().min(15),
+  tags: z.array(z.string()).min(1).optional(),
+  ingress: z.string().min(15).optional(),
+  category: z.string().min(1).optional(),
   generationNotes: z.string(),
   sourcePostUsed: z.array(z.string())
 });
 
 export type GeneratedDraft = z.infer<typeof GeneratedDraftSchema>;
+
+export const createGeneratedDraftSchema = (frontmatter: BlogFrontmatterPreference = {}) =>
+  z.object({
+    title: z.string().min(8),
+    slug: BlogSlugSchema,
+    body: z.string().min(50),
+    tags: frontmatter.tags ? z.array(z.string()).min(1) : z.array(z.string()).min(1).optional(),
+    ingress: frontmatter.ingress ? z.string().min(15) : z.string().min(15).optional(),
+    category: z.string().min(1).optional(),
+    generationNotes: z.string(),
+    sourcePostUsed: z.array(z.string())
+  });
 
 export const GeneratedSocialVariantSchema = z.object({
   platform: z.enum(['x', 'linkedin']),

@@ -370,14 +370,17 @@ export const createDraftFromGeneration = (
     bundleId,
     slug: draft.slug,
     title: draft.title,
-    ingress: draft.ingress,
+    ingress: draft.ingress ?? null,
     body: draft.body,
     frontmatter: {
       title: draft.title,
-      ingress: draft.ingress,
-      tags: draft.tags
+      ...(draft.ingress ? { ingress: draft.ingress } : {}),
+      ...((draft.category ?? request.category)
+        ? { category: draft.category ?? request.category }
+        : {}),
+      ...(draft.tags ? { tags: draft.tags } : {})
     },
-    tags: draft.tags,
+    tags: draft.tags ?? [],
     contentType: 'blog',
     variantRole: 'primary',
     status: 'draft',
@@ -405,6 +408,8 @@ export const createDraftFromGeneration = (
       title: post.title,
       tags: post.tags,
       tagCount: post.tags.length,
+      hasIngress: Boolean(post.ingress),
+      category: post.frontmatter.category ?? null,
       bodyLength: post.body.length,
       model,
       promptLength: prompt.length,

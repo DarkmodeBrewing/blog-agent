@@ -97,22 +97,36 @@ const targetSet = new Set<PublishTarget>(publishTargetDefinitions.map((target) =
 
 const buildFrontmatter = (post: PostRecord) => {
   const template = getFrontmatterTemplate();
+  const values: Record<string, unknown> = {
+    title: template.title ? post.title : undefined,
+    slug: template.slug ? post.slug : undefined,
+    ingress: template.ingress && post.ingress ? post.ingress : undefined,
+    tags: template.tags ? post.tags : undefined,
+    category: template.category
+      ? typeof post.frontmatter.category === 'string' && post.frontmatter.category
+        ? post.frontmatter.category
+        : template.defaults.category || undefined
+      : undefined,
+    date: template.date
+      ? typeof post.frontmatter.date === 'string' && post.frontmatter.date
+        ? post.frontmatter.date
+        : template.defaults.date || new Date().toISOString()
+      : undefined,
+    draft: template.draft
+      ? typeof post.frontmatter.draft === 'boolean'
+        ? post.frontmatter.draft
+        : template.defaults.draft
+      : undefined
+  };
+
   const frontmatter: Record<string, unknown> = {};
 
-  if (template.title) frontmatter.title = post.title;
-  if (template.slug) frontmatter.slug = post.slug;
-  if (template.ingress && post.ingress) frontmatter.ingress = post.ingress;
-  if (template.tags) frontmatter.tags = post.tags;
+  for (const field of template.order) {
+    const value = values[field];
 
-  const category = typeof post.frontmatter.category === 'string' ? post.frontmatter.category : null;
-  if (template.category && category) frontmatter.category = category;
-
-  const date = typeof post.frontmatter.date === 'string' ? post.frontmatter.date : null;
-  if (template.date) frontmatter.date = date ?? new Date().toISOString();
-
-  if (template.draft) {
-    frontmatter.draft =
-      typeof post.frontmatter.draft === 'boolean' ? post.frontmatter.draft : template.draftDefault;
+    if (value !== undefined) {
+      frontmatter[field] = value;
+    }
   }
 
   return frontmatter;

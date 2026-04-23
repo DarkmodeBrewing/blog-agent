@@ -1,12 +1,21 @@
 import { eq } from 'drizzle-orm';
 import { z } from 'zod/v4';
-import { systemsPrompt } from '../../openai/prompts';
+import {
+  composeSystemPrompt,
+  defaultPromptTemplates,
+  systemsPrompt,
+  type PromptTemplates
+} from '../../openai/prompts';
 import { getDatabase } from './database';
 import { appSettings } from './db/schema';
 import { getErrorMessage, hashText, logWorkflow } from './workflow-log';
 
 const settingKeys = {
   systemPrompt: 'system_prompt',
+  promptSharedVoice: 'prompt_shared_voice',
+  promptBlogGeneration: 'prompt_blog_generation',
+  promptSocialGeneration: 'prompt_social_generation',
+  promptGuardrails: 'prompt_guardrails',
   openaiApiKey: 'openai_api_key',
   openaiModelList: 'openai_model_list',
   openaiSelectedModel: 'openai_selected_model',
@@ -23,6 +32,17 @@ const settingKeys = {
 } as const;
 
 const defaultModels = ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano'];
+const frontmatterFieldNames = [
+  'title',
+  'slug',
+  'ingress',
+  'tags',
+  'category',
+  'date',
+  'draft'
+] as const;
+const FrontmatterFieldSchema = z.enum(frontmatterFieldNames);
+export type FrontmatterField = (typeof frontmatterFieldNames)[number];
 
 const FrontmatterTemplateSchema = z.object({
   title: z.boolean().default(true),
@@ -32,7 +52,31 @@ const FrontmatterTemplateSchema = z.object({
   category: z.boolean().default(false),
   date: z.boolean().default(false),
   draft: z.boolean().default(false),
-  draftDefault: z.boolean().default(true)
+  defaults: z
+    .object({
+      category: z.string().default(''),
+      date: z.string().default(''),
+      draft: z.boolean().default(true)
+    })
+    .default({
+      category: '',
+      date: '',
+      draft: true
+    }),
+  order: z
+    .array(FrontmatterFieldSchema)
+    .default([...frontmatterFieldNames])
+    .transform((fields) => {
+      const unique = [...new Set(fields)];
+
+      for (const field of frontmatterFieldNames) {
+        if (!unique.includes(field)) {
+          unique.push(field);
+        }
+      }
+
+      return unique;
+    })
 });
 
 export type FrontmatterTemplate = z.infer<typeof FrontmatterTemplateSchema>;
@@ -76,6 +120,10 @@ export type AppSettingsSnapshot = {
   };
   markdownExport: MarkdownExportSettings;
   frontmatter: FrontmatterTemplate;
+};
+
+export type PromptTemplateSnapshot = PromptTemplates & {
+  composedPrompt: string;
 };
 
 export type AppReadinessIssue = {
@@ -192,36 +240,90 @@ const saveJsonSetting = (key: string, value: unknown) => {
 };
 
 export const getSystemPrompt = () => {
-  const prompt = getSetting(settingKeys.systemPrompt);
-
-  if (prompt && prompt.trim().length >= 100) {
-    return prompt;
-  }
-
-  setSetting(settingKeys.systemPrompt, systemsPrompt);
-
-  return systemsPrompt;
+  return getPromptTemplates().composedPrompt;
 };
 
-export const setSystemPrompt = (value: string) => {
-  const existing = getSetting(settingKeys.systemPrompt);
-  setSetting(settingKeys.systemPrompt, value);
+export const getPromptTemplates = (): PromptTemplateSnapshot => {
+  const sharedVoice =
+    getSetting(settingKeys.promptSharedVoice)?.trim() || defaultPromptTemplates.sharedVoice;
+  const blogGeneration =
+    getSetting(settingKeys.promptBlogGeneration)?.trim() || defaultPromptTemplates.blogGeneration;
+  const socialGeneration =
+    getSetting(settingKeys.promptSocialGeneration)?.trim() ||
+    defaultPromptTemplates.socialGeneration;
+  const guardrails =
+    getSetting(settingKeys.promptGuardrails)?.trim() || defaultPromptTemplates.guardrails;
+
+  if (!getSetting(settingKeys.promptSharedVoice)) {
+    setSetting(settingKeys.promptSharedVoice, sharedVoice);
+  }
+
+  if (!getSetting(settingKeys.promptBlogGeneration)) {
+    setSetting(settingKeys.promptBlogGeneration, blogGeneration);
+  }
+
+  if (!getSetting(settingKeys.promptSocialGeneration)) {
+    setSetting(settingKeys.promptSocialGeneration, socialGeneration);
+  }
+
+  if (!getSetting(settingKeys.promptGuardrails)) {
+    setSetting(settingKeys.promptGuardrails, guardrails);
+  }
+
+  return {
+    sharedVoice,
+    blogGeneration,
+    socialGeneration,
+    guardrails,
+    composedPrompt: composeSystemPrompt({
+      sharedVoice,
+      blogGeneration,
+      socialGeneration,
+      guardrails
+    })
+  };
+};
+
+export const setPromptTemplates = (value: PromptTemplates) => {
+  const existing = getPromptTemplates();
+  setSetting(settingKeys.promptSharedVoice, value.sharedVoice.trim());
+  setSetting(settingKeys.promptBlogGeneration, value.blogGeneration.trim());
+  setSetting(settingKeys.promptSocialGeneration, value.socialGeneration.trim());
+  setSetting(settingKeys.promptGuardrails, value.guardrails.trim());
+  const updated = getPromptTemplates();
 
   logWorkflow({
     level: 'info',
     message: 'settings.prompt.updated',
     details: {
-      previousLength: existing?.length ?? null,
-      previousHash: existing ? hashText(existing) : null,
-      newLength: value.length,
-      newHash: hashText(value)
+      previousLength: existing.composedPrompt.length,
+      previousHash: hashText(existing.composedPrompt),
+      newLength: updated.composedPrompt.length,
+      newHash: hashText(updated.composedPrompt),
+      sections: {
+        sharedVoice: value.sharedVoice.length,
+        blogGeneration: value.blogGeneration.length,
+        socialGeneration: value.socialGeneration.length,
+        guardrails: value.guardrails.length
+      }
     }
   });
 
-  return value;
+  return updated;
 };
 
-export const resetSystemPrompt = () => setSystemPrompt(systemsPrompt);
+export const setSystemPrompt = (value: string) =>
+  setPromptTemplates({
+    ...getPromptTemplates(),
+    sharedVoice: value
+  }).composedPrompt;
+
+export const resetPromptTemplates = () => setPromptTemplates(defaultPromptTemplates);
+
+export const resetSystemPrompt = () => {
+  resetPromptTemplates();
+  return systemsPrompt;
+};
 
 export const getOpenAISettings = (): OpenAISettings => {
   const models = parseModelList(getSetting(settingKeys.openaiModelList));
@@ -419,7 +521,7 @@ export const updateAppSettings = (input: AppSettingsUpdateInput) => {
       markdownDownloadEnabled: updated.markdownExport.downloadEnabled,
       markdownDiskExportEnabled: updated.markdownExport.diskExportEnabled,
       frontmatterFieldsEnabled: Object.entries(updated.frontmatter)
-        .filter(([key, enabled]) => key !== 'draftDefault' && enabled)
+        .filter(([key, enabled]) => key !== 'defaults' && key !== 'order' && enabled)
         .map(([key]) => key)
     }
   });

@@ -9,7 +9,7 @@ This document breaks the requested changes into implementation phases in the ord
 - [x] Phase 3: Publishing architecture redesign
 - [x] Phase 4: Content model expansion
 - [x] Phase 5: Generation workflow redesign
-- [ ] Phase 6: Prompt and template refactor
+- [x] Phase 6: Prompt and template refactor
 - [ ] Phase 7: API refactor
 - [ ] Phase 8: Database and Drizzle migration
 - [ ] Phase 9: UI refactor
@@ -157,19 +157,21 @@ Status: Completed
 
 ## Phase 6: Prompt and Template Refactor
 
-- Split the current single system prompt into configurable prompt blocks or templates.
-  - Shared editorial voice
-  - Blog generation instructions
-  - Derived social content instructions
-  - Guardrail instructions
-- Store prompt settings in the database and expose them through settings UI.
-- Add configurable frontmatter template definitions for blog export.
-  - Field enabled/disabled
-  - Field order
-  - Optional static defaults
-- Ensure generation schema and export schema stay aligned.
-  - If tags are disabled in frontmatter, that should not force tag output everywhere.
-  - If ingress is optional, generation should only require it when the selected blog template needs it.
+- Status: Completed
+
+- [x] Split the current single system prompt into configurable prompt blocks or templates.
+  - [x] Shared editorial voice
+  - [x] Blog generation instructions
+  - [x] Derived social content instructions
+  - [x] Guardrail instructions
+- [x] Store prompt settings in the database and expose them through settings UI.
+- [x] Add configurable frontmatter template definitions for blog export.
+  - [x] Field enabled/disabled
+  - [x] Field order
+  - [x] Optional static defaults
+- [x] Ensure generation schema and export schema stay aligned.
+  - [x] If tags are disabled in frontmatter, that should not force tag output everywhere.
+  - [x] If ingress is optional, generation should only require it when the selected blog template needs it.
 
 ## Phase 7: API Refactor
 

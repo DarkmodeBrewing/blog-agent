@@ -224,7 +224,14 @@
     try {
       const data = await requestJson<{
         settings: {
-          frontmatter: FrontmatterPreferences & { draftDefault: boolean };
+          frontmatter: FrontmatterPreferences & {
+            defaults: {
+              category: string;
+              date: string;
+              draft: boolean;
+            };
+            order: Array<'title' | 'slug' | 'ingress' | 'tags' | 'category' | 'date' | 'draft'>;
+          };
         };
       }>(apiUrl('/api/settings/app'));
 
