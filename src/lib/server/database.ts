@@ -1,21 +1,24 @@
 import { env } from '$env/dynamic/private';
 import Database from 'better-sqlite3';
+import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import * as schema from './db/schema';
 
 const databasePath = resolve(process.cwd(), env.SQLITE_DATABASE_PATH ?? 'data/blog-agent.sqlite');
 
-let database: Database.Database | undefined;
+let sqliteDatabase: Database.Database | undefined;
+let drizzleDatabase: BetterSQLite3Database<typeof schema> | undefined;
 
-export const getDatabase = () => {
-  if (!database) {
+export const getSqliteDatabase = () => {
+  if (!sqliteDatabase) {
     mkdirSync(dirname(databasePath), { recursive: true });
 
-    database = new Database(databasePath);
-    database.pragma('journal_mode = WAL');
-    database.pragma('foreign_keys = ON');
+    sqliteDatabase = new Database(databasePath);
+    sqliteDatabase.pragma('journal_mode = WAL');
+    sqliteDatabase.pragma('foreign_keys = ON');
 
-    database.exec(`
+    sqliteDatabase.exec(`
       CREATE TABLE IF NOT EXISTS log_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         level TEXT NOT NULL CHECK (level IN ('debug', 'info', 'warn', 'error')),
@@ -111,5 +114,13 @@ export const getDatabase = () => {
     `);
   }
 
-  return database;
+  return sqliteDatabase;
+};
+
+export const getDatabase = () => {
+  if (!drizzleDatabase) {
+    drizzleDatabase = drizzle(getSqliteDatabase(), { schema });
+  }
+
+  return drizzleDatabase;
 };

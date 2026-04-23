@@ -1,5 +1,7 @@
+import { eq } from 'drizzle-orm';
 import { systemsPrompt } from '../../openai/prompts';
 import { getDatabase } from './database';
+import { appSettings } from './db/schema';
 import { hashText, logWorkflow } from './workflow-log';
 
 const systemPromptKey = 'system_prompt';
@@ -7,34 +9,30 @@ const modelListKey = 'openai_model_list';
 const selectedModelKey = 'openai_selected_model';
 const defaultModels = ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano'];
 
-type SettingRow = {
-  value: string;
-};
-
 const getSetting = (key: string) => {
   return getDatabase()
-    .prepare<[string], SettingRow>('SELECT value FROM app_settings WHERE key = ?')
-    .get(key)?.value;
+    .select({ value: appSettings.value })
+    .from(appSettings)
+    .where(eq(appSettings.key, key))
+    .get()?.value;
 };
 
 const setSetting = (key: string, value: string) => {
   getDatabase()
-    .prepare<{
-      key: string;
-      value: string;
-    }>(
-      `
-      INSERT INTO app_settings (key, value, updated_at)
-      VALUES (@key, @value, datetime('now'))
-      ON CONFLICT(key) DO UPDATE SET
-        value = excluded.value,
-        updated_at = datetime('now')
-    `
-    )
-    .run({
+    .insert(appSettings)
+    .values({
       key,
-      value
-    });
+      value,
+      updatedAt: new Date().toISOString()
+    })
+    .onConflictDoUpdate({
+      target: appSettings.key,
+      set: {
+        value,
+        updatedAt: new Date().toISOString()
+      }
+    })
+    .run();
 };
 
 const parseModelList = (value: string | undefined) => {
@@ -58,8 +56,10 @@ const parseModelList = (value: string | undefined) => {
 
 export const getSystemPrompt = () => {
   const row = getDatabase()
-    .prepare<[string], SettingRow>('SELECT value FROM app_settings WHERE key = ?')
-    .get(systemPromptKey);
+    .select({ value: appSettings.value })
+    .from(appSettings)
+    .where(eq(appSettings.key, systemPromptKey))
+    .get();
 
   if (row) {
     logWorkflow({

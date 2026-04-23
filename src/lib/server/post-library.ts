@@ -1,5 +1,7 @@
 import matter from 'gray-matter';
+import { desc, eq, sql } from 'drizzle-orm';
 import { getDatabase } from './database';
+import { generationRuns, posts, postStatusEvents } from './db/schema';
 import { getGitHubBlogPostFiles, getGitHubRepoConfig } from './get-posts-from-repo';
 import type { DraftRequest, GeneratedDraft } from '../../openai/model';
 import { getOctokit } from './clients';
@@ -24,22 +26,6 @@ export type PostRecord = {
   updatedAt: string;
 };
 
-type PostRow = {
-  id: number;
-  slug: string;
-  title: string;
-  ingress: string | null;
-  body: string;
-  frontmatter_json: string;
-  tags_json: string;
-  status: PostStatus;
-  github_path: string | null;
-  github_sha: string | null;
-  source: PostSource;
-  created_at: string;
-  updated_at: string;
-};
-
 type UpsertPostInput = {
   slug: string;
   title: string;
@@ -54,20 +40,20 @@ type UpsertPostInput = {
   statusNotes?: string;
 };
 
-const mapPostRow = (row: PostRow): PostRecord => ({
+const mapPostRow = (row: typeof posts.$inferSelect): PostRecord => ({
   id: row.id,
   slug: row.slug,
   title: row.title,
   ingress: row.ingress,
   body: row.body,
-  frontmatter: JSON.parse(row.frontmatter_json) as Record<string, unknown>,
-  tags: JSON.parse(row.tags_json) as string[],
+  frontmatter: JSON.parse(row.frontmatterJson) as Record<string, unknown>,
+  tags: JSON.parse(row.tagsJson) as string[],
   status: row.status,
-  githubPath: row.github_path,
-  githubSha: row.github_sha,
+  githubPath: row.githubPath,
+  githubSha: row.githubSha,
   source: row.source,
-  createdAt: row.created_at,
-  updatedAt: row.updated_at
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt
 });
 
 const getStringField = (data: Record<string, unknown>, key: string) => {
@@ -88,17 +74,18 @@ export const listPosts = (status?: PostStatus) => {
   const database = getDatabase();
   const rows = status
     ? database
-        .prepare<[string], PostRow>('SELECT * FROM posts WHERE status = ? ORDER BY updated_at DESC')
-        .all(status)
-    : database.prepare<[], PostRow>('SELECT * FROM posts ORDER BY updated_at DESC').all();
+        .select()
+        .from(posts)
+        .where(eq(posts.status, status))
+        .orderBy(desc(posts.updatedAt))
+        .all()
+    : database.select().from(posts).orderBy(desc(posts.updatedAt)).all();
 
   return rows.map(mapPostRow);
 };
 
 export const getPostBySlug = (slug: string) => {
-  const row = getDatabase()
-    .prepare<[string], PostRow>('SELECT * FROM posts WHERE slug = ?')
-    .get(slug);
+  const row = getDatabase().select().from(posts).where(eq(posts.slug, slug)).get();
 
   return row ? mapPostRow(row) : null;
 };
@@ -107,69 +94,38 @@ export const upsertPost = (input: UpsertPostInput) => {
   const database = getDatabase();
   const existing = getPostBySlug(input.slug);
 
+  const values = {
+    slug: input.slug,
+    title: input.title,
+    ingress: input.ingress ?? null,
+    body: input.body,
+    frontmatterJson: JSON.stringify(input.frontmatter ?? {}),
+    tagsJson: JSON.stringify(input.tags ?? []),
+    status: input.status,
+    githubPath: input.githubPath ?? null,
+    githubSha: input.githubSha ?? null,
+    source: input.source
+  };
+
   const result = database
-    .prepare<{
-      slug: string;
-      title: string;
-      ingress: string | null;
-      body: string;
-      frontmatterJson: string;
-      tagsJson: string;
-      status: PostStatus;
-      githubPath: string | null;
-      githubSha: string | null;
-      source: PostSource;
-    }>(
-      `
-        INSERT INTO posts (
-          slug,
-          title,
-          ingress,
-          body,
-          frontmatter_json,
-          tags_json,
-          status,
-          github_path,
-          github_sha,
-          source
-        )
-        VALUES (
-          @slug,
-          @title,
-          @ingress,
-          @body,
-          @frontmatterJson,
-          @tagsJson,
-          @status,
-          @githubPath,
-          @githubSha,
-          @source
-        )
-        ON CONFLICT(slug) DO UPDATE SET
-          title = excluded.title,
-          ingress = excluded.ingress,
-          body = excluded.body,
-          frontmatter_json = excluded.frontmatter_json,
-          tags_json = excluded.tags_json,
-          status = excluded.status,
-          github_path = excluded.github_path,
-          github_sha = excluded.github_sha,
-          source = excluded.source,
-          updated_at = datetime('now')
-      `
-    )
-    .run({
-      slug: input.slug,
-      title: input.title,
-      ingress: input.ingress ?? null,
-      body: input.body,
-      frontmatterJson: JSON.stringify(input.frontmatter ?? {}),
-      tagsJson: JSON.stringify(input.tags ?? []),
-      status: input.status,
-      githubPath: input.githubPath ?? null,
-      githubSha: input.githubSha ?? null,
-      source: input.source
-    });
+    .insert(posts)
+    .values(values)
+    .onConflictDoUpdate({
+      target: posts.slug,
+      set: {
+        title: values.title,
+        ingress: values.ingress,
+        body: values.body,
+        frontmatterJson: values.frontmatterJson,
+        tagsJson: values.tagsJson,
+        status: values.status,
+        githubPath: values.githubPath,
+        githubSha: values.githubSha,
+        source: values.source,
+        updatedAt: sql`datetime('now')`
+      }
+    })
+    .run();
 
   const post = getPostBySlug(input.slug);
 
@@ -179,23 +135,14 @@ export const upsertPost = (input: UpsertPostInput) => {
 
   if (!existing || existing.status !== input.status) {
     database
-      .prepare<{
-        postId: number;
-        fromStatus: PostStatus | null;
-        toStatus: PostStatus;
-        notes: string | null;
-      }>(
-        `
-          INSERT INTO post_status_events (post_id, from_status, to_status, notes)
-          VALUES (@postId, @fromStatus, @toStatus, @notes)
-        `
-      )
-      .run({
+      .insert(postStatusEvents)
+      .values({
         postId: post.id,
         fromStatus: existing?.status ?? null,
         toStatus: input.status,
         notes: input.statusNotes ?? null
-      });
+      })
+      .run();
   }
 
   return {
@@ -227,41 +174,16 @@ export const createDraftFromGeneration = (
   });
 
   getDatabase()
-    .prepare<{
-      postId: number;
-      model: string;
-      prompt: string;
-      requestJson: string;
-      responseJson: string;
-      sourcePostSlugsJson: string;
-    }>(
-      `
-        INSERT INTO generation_runs (
-          post_id,
-          model,
-          prompt,
-          request_json,
-          response_json,
-          source_post_slugs_json
-        )
-        VALUES (
-          @postId,
-          @model,
-          @prompt,
-          @requestJson,
-          @responseJson,
-          @sourcePostSlugsJson
-        )
-      `
-    )
-    .run({
+    .insert(generationRuns)
+    .values({
       postId: post.id,
       model,
       prompt,
       requestJson: JSON.stringify(request),
       responseJson: JSON.stringify(draft),
       sourcePostSlugsJson: JSON.stringify(draft.sourcePostUsed)
-    });
+    })
+    .run();
 
   logWorkflow({
     level: 'info',

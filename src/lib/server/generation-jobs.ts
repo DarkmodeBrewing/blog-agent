@@ -1,43 +1,31 @@
 import { randomUUID } from 'node:crypto';
+import { eq, sql } from 'drizzle-orm';
 import type { DraftRequest } from '../../openai/model';
 import { generateBlogDraft } from './blog-draft';
 import { getDatabase } from './database';
+import { generationJobs } from './db/schema';
 import { getPostBySlug } from './post-library';
 import { getErrorMessage, logWorkflow } from './workflow-log';
 
 type GenerationJobStatus = 'queued' | 'running' | 'completed' | 'failed';
 
-type GenerationJobRow = {
-  id: string;
-  status: GenerationJobStatus;
-  request_json: string;
-  draft_slug: string | null;
-  error: string | null;
-  created_at: string;
-  started_at: string | null;
-  completed_at: string | null;
-  updated_at: string;
-};
-
 const runningJobs = new Set<string>();
 
-const mapGenerationJob = (row: GenerationJobRow) => ({
+const mapGenerationJob = (row: typeof generationJobs.$inferSelect) => ({
   id: row.id,
   status: row.status,
-  request: JSON.parse(row.request_json) as DraftRequest,
-  draftSlug: row.draft_slug,
+  request: JSON.parse(row.requestJson) as DraftRequest,
+  draftSlug: row.draftSlug,
   error: row.error,
-  createdAt: row.created_at,
-  startedAt: row.started_at,
-  completedAt: row.completed_at,
-  updatedAt: row.updated_at,
-  draft: row.draft_slug ? getPostBySlug(row.draft_slug) : null
+  createdAt: row.createdAt,
+  startedAt: row.startedAt,
+  completedAt: row.completedAt,
+  updatedAt: row.updatedAt,
+  draft: row.draftSlug ? getPostBySlug(row.draftSlug) : null
 });
 
 export const getGenerationJob = (id: string) => {
-  const row = getDatabase()
-    .prepare<[string], GenerationJobRow>('SELECT * FROM generation_jobs WHERE id = ?')
-    .get(id);
+  const row = getDatabase().select().from(generationJobs).where(eq(generationJobs.id, id)).get();
 
   return row ? mapGenerationJob(row) : null;
 };
@@ -46,19 +34,13 @@ export const createGenerationJob = (request: DraftRequest) => {
   const id = randomUUID();
 
   getDatabase()
-    .prepare<{
-      id: string;
-      requestJson: string;
-    }>(
-      `
-        INSERT INTO generation_jobs (id, status, request_json)
-        VALUES (@id, 'queued', @requestJson)
-      `
-    )
-    .run({
+    .insert(generationJobs)
+    .values({
       id,
+      status: 'queued',
       requestJson: JSON.stringify(request)
-    });
+    })
+    .run();
 
   logWorkflow({
     level: 'info',
@@ -87,36 +69,23 @@ const updateGenerationJobStatus = (
   }
 ) => {
   getDatabase()
-    .prepare<{
-      id: string;
-      status: GenerationJobStatus;
-      draftSlug: string | null;
-      error: string | null;
-    }>(
-      `
-        UPDATE generation_jobs
-        SET
-          status = @status,
-          draft_slug = COALESCE(@draftSlug, draft_slug),
-          error = @error,
-          started_at = CASE
-            WHEN @status = 'running' AND started_at IS NULL THEN datetime('now')
-            ELSE started_at
-          END,
-          completed_at = CASE
-            WHEN @status IN ('completed', 'failed') THEN datetime('now')
-            ELSE completed_at
-          END,
-          updated_at = datetime('now')
-        WHERE id = @id
-      `
-    )
-    .run({
-      id,
+    .update(generationJobs)
+    .set({
       status: input.status,
-      draftSlug: input.draftSlug ?? null,
-      error: input.error ?? null
-    });
+      draftSlug: input.draftSlug ?? sql`${generationJobs.draftSlug}`,
+      error: input.error ?? null,
+      startedAt:
+        input.status === 'running'
+          ? sql`coalesce(${generationJobs.startedAt}, datetime('now'))`
+          : sql`${generationJobs.startedAt}`,
+      completedAt:
+        input.status === 'completed' || input.status === 'failed'
+          ? sql`datetime('now')`
+          : sql`${generationJobs.completedAt}`,
+      updatedAt: sql`datetime('now')`
+    })
+    .where(eq(generationJobs.id, id))
+    .run();
 };
 
 export const runGenerationJob = async (id: string) => {
