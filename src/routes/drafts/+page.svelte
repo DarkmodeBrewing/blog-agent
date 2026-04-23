@@ -15,14 +15,20 @@
     status: PostStatus;
   };
 
-  type DraftResponse = {
-    draft: {
-      slug: string;
-      title: string;
-      ingress: string;
-      body: string;
-      tags: string[];
-    };
+  type GenerationJob = {
+    id: string;
+    status: 'queued' | 'running' | 'completed' | 'failed';
+    draftSlug: string | null;
+    error: string | null;
+    draft: PostRecord | null;
+  };
+
+  type GenerateResponse = {
+    job: GenerationJob;
+  };
+
+  type GenerationJobResponse = {
+    job: GenerationJob;
   };
 
   type LogEvent = {
@@ -36,6 +42,8 @@
   let logs = $state<LogEvent[]>([]);
   let loadingPosts = $state(false);
   let generating = $state(false);
+  let generationJobId = $state<string | null>(null);
+  let generationJobStatus = $state<GenerationJob['status'] | null>(null);
   let saving = $state(false);
   let statusMessage = $state('');
   let errorMessage = $state('');
@@ -58,6 +66,9 @@
     posts.filter((post) => referencePostSlugs.includes(post.slug)).map((post) => post.title)
   );
   let hasDraft = $derived(Boolean(editorSlug));
+  let controlsDisabled = $derived(generating || saving);
+
+  let pollTimer: ReturnType<typeof setTimeout> | undefined;
 
   const splitCsv = (value: string) =>
     value
@@ -93,10 +104,59 @@
     editorBody = post.body;
   };
 
+  const clearGenerationPoll = () => {
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = undefined;
+    }
+  };
+
+  const pollGenerationJob = async (jobId: string) => {
+    try {
+      const data = await requestJson<GenerationJobResponse>(
+        apiUrl(`/api/generation-jobs/${encodeURIComponent(jobId)}`)
+      );
+      generationJobStatus = data.job.status;
+
+      if (data.job.status === 'completed' && data.job.draft) {
+        clearGenerationPoll();
+        loadDraftIntoEditor(data.job.draft);
+        statusMessage = `Generated ${data.job.draft.slug}`;
+        generationJobId = null;
+        generationJobStatus = null;
+        generating = false;
+        await loadPosts();
+        return;
+      }
+
+      if (data.job.status === 'failed') {
+        clearGenerationPoll();
+        errorMessage = data.job.error ?? 'Draft generation failed';
+        generationJobId = null;
+        generationJobStatus = null;
+        generating = false;
+        return;
+      }
+
+      pollTimer = setTimeout(() => {
+        void pollGenerationJob(jobId);
+      }, 1500);
+    } catch (error) {
+      clearGenerationPoll();
+      errorMessage = error instanceof Error ? error.message : 'Failed to check generation job';
+      generationJobId = null;
+      generationJobStatus = null;
+      generating = false;
+    }
+  };
+
   const generateDraft = async () => {
     generating = true;
+    generationJobId = null;
+    generationJobStatus = 'queued';
     statusMessage = '';
     errorMessage = '';
+    clearGenerationPoll();
 
     try {
       const payload = {
@@ -108,22 +168,21 @@
         desiredLength,
         referencePostSlugs
       };
-      const data = await requestJson<DraftResponse>(apiUrl('/api/integrations/openai/generate'), {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const data = await requestJson<GenerateResponse>(
+        apiUrl('/api/integrations/openai/generate'),
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload)
+        }
+      );
 
-      editorSlug = data.draft.slug;
-      editorTitle = data.draft.title;
-      editorIngress = data.draft.ingress;
-      editorTags = data.draft.tags.join(', ');
-      editorBody = data.draft.body;
-      statusMessage = `Generated ${data.draft.slug}`;
-      await loadPosts();
+      generationJobId = data.job.id;
+      generationJobStatus = data.job.status;
+      statusMessage = 'Generation job started';
+      void pollGenerationJob(data.job.id);
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : 'Draft generation failed';
-    } finally {
       generating = false;
     }
   };
@@ -205,6 +264,7 @@
   });
 
   onDestroy(() => {
+    clearGenerationPoll();
     logs = [];
   });
 </script>
@@ -226,6 +286,21 @@
     <p class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
       {errorMessage}
     </p>
+  {/if}
+
+  {#if generating}
+    <div class="rounded-md border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-900">
+      <div class="flex items-center gap-3">
+        <span
+          class="h-4 w-4 animate-spin rounded-full border-2 border-cyan-700 border-t-transparent"
+        ></span>
+        <span>
+          Generation {generationJobStatus ?? 'queued'}{generationJobId
+            ? ` · ${generationJobId.slice(0, 8)}`
+            : ''}
+        </span>
+      </div>
+    </div>
   {/if}
 
   <section class="grid grid-rows-2 gap-2">
@@ -253,6 +328,7 @@
           <input
             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={topic}
+            disabled={generating}
             minlength="10"
             required
           />
@@ -263,6 +339,7 @@
           <textarea
             class="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={summary}
+            disabled={generating}
           ></textarea>
         </label>
 
@@ -272,6 +349,7 @@
             <select
               class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
               bind:value={desiredLength}
+              disabled={generating}
             >
               <option value="short">Short</option>
               <option value="medium">Medium</option>
@@ -284,6 +362,7 @@
             <input
               class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
               bind:value={category}
+              disabled={generating}
             />
           </label>
         </div>
@@ -293,6 +372,7 @@
           <input
             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={keywords}
+            disabled={generating}
           />
         </label>
 
@@ -301,6 +381,7 @@
           <input
             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={requestedTags}
+            disabled={generating}
           />
         </label>
 
@@ -335,6 +416,7 @@
               <h2 class="text-base font-semibold text-slate-950">References</h2>
               <button
                 class="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700"
+                disabled={generating}
                 type="button"
                 onclick={() => void loadPosts()}
               >
@@ -354,6 +436,7 @@
                   <label class="flex gap-2 text-sm">
                     <input
                       checked={referencePostSlugs.includes(post.slug)}
+                      disabled={generating}
                       onchange={() => toggleReferencePost(post.slug)}
                       type="checkbox"
                     />
@@ -365,6 +448,7 @@
                   {#if post.status === 'draft' || post.status === 'approved'}
                     <button
                       class="mt-2 rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700"
+                      disabled={generating}
                       type="button"
                       onclick={() => loadDraftIntoEditor(post)}
                     >
@@ -388,7 +472,7 @@
         <div class="flex flex-wrap gap-2">
           <button
             class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
-            disabled={!hasDraft || saving}
+            disabled={!hasDraft || controlsDisabled}
             type="button"
             onclick={() => void saveDraft()}
           >
@@ -396,7 +480,7 @@
           </button>
           <button
             class="rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-            disabled={!hasDraft}
+            disabled={!hasDraft || controlsDisabled}
             type="button"
             onclick={() => void updateStatus('approved')}
           >
@@ -404,7 +488,7 @@
           </button>
           <button
             class="rounded-md bg-red-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-            disabled={!hasDraft}
+            disabled={!hasDraft || controlsDisabled}
             type="button"
             onclick={() => void updateStatus('rejected')}
           >
@@ -412,7 +496,7 @@
           </button>
           <button
             class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-            disabled={!hasDraft}
+            disabled={!hasDraft || controlsDisabled}
             type="button"
             onclick={() => void publishDraft()}
           >
@@ -427,7 +511,7 @@
           <input
             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={editorTitle}
-            disabled={!hasDraft}
+            disabled={!hasDraft || generating}
           />
         </label>
 
@@ -436,7 +520,7 @@
           <textarea
             class="mt-1 min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={editorIngress}
-            disabled={!hasDraft}
+            disabled={!hasDraft || generating}
           ></textarea>
         </label>
 
@@ -445,7 +529,7 @@
           <input
             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={editorTags}
-            disabled={!hasDraft}
+            disabled={!hasDraft || generating}
           />
         </label>
 
@@ -454,7 +538,7 @@
           <textarea
             class="mt-1 min-h-136 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm leading-6 outline-none focus:border-slate-900"
             bind:value={editorBody}
-            disabled={!hasDraft}
+            disabled={!hasDraft || generating}
             spellcheck="false"
           ></textarea>
         </label>

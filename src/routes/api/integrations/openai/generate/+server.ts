@@ -1,8 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { DraftRequestSchema } from '../../../../../openai/model';
-import { generateBlogDraft } from '$lib/server/blog-draft';
-import { getErrorMessage, logWorkflow } from '$lib/server/workflow-log';
+import { createGenerationJob } from '$lib/server/generation-jobs';
 
 export const POST: RequestHandler = async ({ request }) => {
   const requestBody = await request.json().catch(() => undefined);
@@ -19,35 +18,7 @@ export const POST: RequestHandler = async ({ request }) => {
   }
 
   const body = parsedBody.data;
+  const job = createGenerationJob(body);
 
-  let draft;
-
-  try {
-    draft = await generateBlogDraft(body);
-  } catch (cause) {
-    console.error(cause);
-    logWorkflow({
-      level: 'error',
-      message: 'generation.failed',
-      details: {
-        stage: 'api.integrations.openai.generate',
-        topic: body.topic,
-        desiredLength: body.desiredLength,
-        error: getErrorMessage(cause)
-      }
-    });
-
-    return json(
-      {
-        error: 'Draft generation failed'
-      },
-      { status: 502 }
-    );
-  }
-
-  if (!draft) {
-    return json({ error: 'Model did not return a valid draft' }, { status: 502 });
-  }
-
-  return json({ draft });
+  return json({ job }, { status: 202 });
 };
