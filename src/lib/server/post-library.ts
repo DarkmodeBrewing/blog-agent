@@ -75,6 +75,17 @@ export type PostRecord = {
   isEditable: boolean;
 };
 
+export type PostBundleRecord = {
+  key: string;
+  bundleId: number | null;
+  primaryPost: PostRecord;
+  posts: PostRecord[];
+  contentTypes: PostContentType[];
+  editorialStatuses: PostStatus[];
+  publishedTargets: PublishTarget[];
+  updatedAt: string;
+};
+
 type UpsertPostInput = {
   bundleId?: number | null;
   parentPostId?: number | null;
@@ -274,6 +285,66 @@ export const getBundlePostsForSlug = (slug: string) => {
 
     return b.updatedAt.localeCompare(a.updatedAt);
   });
+};
+
+const toBundleKey = (post: PostRecord) =>
+  post.bundleId ? `bundle:${post.bundleId}` : `post:${post.slug}`;
+
+const mapBundlePosts = (bundlePosts: PostRecord[]): PostBundleRecord => {
+  const sorted = [...bundlePosts].sort((a, b) => {
+    if (a.contentType === 'blog' && b.contentType !== 'blog') return -1;
+    if (b.contentType === 'blog' && a.contentType !== 'blog') return 1;
+    if (a.variantRole === 'primary' && b.variantRole !== 'primary') return -1;
+    if (b.variantRole === 'primary' && a.variantRole !== 'primary') return 1;
+
+    return b.updatedAt.localeCompare(a.updatedAt);
+  });
+  const primaryPost = sorted[0];
+
+  return {
+    key: toBundleKey(primaryPost),
+    bundleId: primaryPost.bundleId,
+    primaryPost,
+    posts: sorted,
+    contentTypes: [...new Set(sorted.map((post) => post.contentType))],
+    editorialStatuses: [...new Set(sorted.map((post) => post.status))],
+    publishedTargets: [
+      ...new Set(sorted.flatMap((post) => post.publicationSummary.publishedTargets))
+    ],
+    updatedAt: sorted.reduce(
+      (latest, post) => (post.updatedAt > latest ? post.updatedAt : latest),
+      primaryPost.updatedAt
+    )
+  };
+};
+
+export const listPostBundles = (status?: PostStatus) => {
+  const grouped = new Map<string, PostRecord[]>();
+
+  for (const post of listPosts(status)) {
+    const key = toBundleKey(post);
+    const existing = grouped.get(key);
+
+    if (existing) {
+      existing.push(post);
+    } else {
+      grouped.set(key, [post]);
+    }
+  }
+
+  return [...grouped.values()]
+    .map(mapBundlePosts)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+};
+
+export const getPostBundleBySlug = (slug: string) => {
+  const bundlePosts = getBundlePostsForSlug(slug);
+
+  if (bundlePosts.length === 0) {
+    return null;
+  }
+
+  return mapBundlePosts(bundlePosts);
 };
 
 export const createContentBundle = () => {

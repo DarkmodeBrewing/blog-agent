@@ -32,6 +32,18 @@
   type PostDetailResponse = {
     post: PostRecord;
     relatedPosts: PostRecord[];
+    bundle: PostBundle | null;
+  };
+
+  type PostBundle = {
+    key: string;
+    bundleId: number | null;
+    primaryPost: PostRecord;
+    posts: PostRecord[];
+    contentTypes: Array<PostRecord['contentType']>;
+    editorialStatuses: PostStatus[];
+    publishedTargets: string[];
+    updatedAt: string;
   };
 
   type AppReadiness = {
@@ -40,9 +52,9 @@
 
   const statuses: Array<PostStatus | 'all'> = ['all', 'draft', 'approved', 'synced', 'rejected'];
 
-  let posts = $state<PostRecord[]>([]);
+  let bundles = $state<PostBundle[]>([]);
   let appReadiness = $state<AppReadiness | null>(null);
-  let relatedPosts = $state<PostRecord[]>([]);
+  let selectedBundle = $state<PostBundle | null>(null);
   let selectedStatus = $state<PostStatus | 'all'>('all');
   let selectedSlug = $state<string | null>(null);
   let loading = $state(false);
@@ -50,18 +62,26 @@
   let statusMessage = $state('');
   let errorMessage = $state('');
 
-  let selectedPost = $derived(posts.find((post) => post.slug === selectedSlug) ?? posts[0] ?? null);
+  let selectedPost = $derived(
+    selectedBundle?.posts.find((post) => post.slug === selectedSlug) ??
+      selectedBundle?.primaryPost ??
+      bundles[0]?.primaryPost ??
+      null
+  );
 
   const loadPosts = async () => {
     loading = true;
     errorMessage = '';
     try {
       const query = selectedStatus === 'all' ? '' : `?status=${selectedStatus}`;
-      const data = await requestJson<{ posts: PostRecord[] }>(apiUrl(`/api/posts${query}`));
-      posts = data.posts;
+      const data = await requestJson<{ bundles: PostBundle[] }>(apiUrl(`/api/posts${query}`));
+      bundles = data.bundles;
 
-      if (selectedSlug && !posts.some((post) => post.slug === selectedSlug)) {
-        selectedSlug = posts[0]?.slug ?? null;
+      if (
+        selectedSlug &&
+        !bundles.some((bundle) => bundle.posts.some((post) => post.slug === selectedSlug))
+      ) {
+        selectedSlug = bundles[0]?.primaryPost.slug ?? null;
       }
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : 'Failed to load posts';
@@ -83,7 +103,7 @@
 
   const loadSelectedPostDetail = async () => {
     if (!selectedSlug) {
-      relatedPosts = [];
+      selectedBundle = null;
       return;
     }
 
@@ -91,9 +111,9 @@
       const data = await requestJson<PostDetailResponse>(
         apiUrl(`/api/posts/${encodeURIComponent(selectedSlug)}`)
       );
-      relatedPosts = data.relatedPosts;
+      selectedBundle = data.bundle;
     } catch {
-      relatedPosts = [];
+      selectedBundle = null;
     }
   };
 
@@ -182,25 +202,33 @@
       <div class="border-b border-slate-200 lg:border-r lg:border-b-0">
         {#if loading}
           <p class="p-4 text-sm text-slate-500">Loading posts...</p>
-        {:else if posts.length === 0}
+        {:else if bundles.length === 0}
           <p class="p-4 text-sm text-slate-500">No posts found.</p>
         {:else}
           <div class="max-h-[42rem] overflow-auto">
-            {#each posts as post (post.id)}
+            {#each bundles as bundle (bundle.key)}
               <button
-                class={`block w-full border-b border-slate-100 px-4 py-3 text-left hover:bg-slate-50 ${selectedPost?.id === post.id ? 'bg-slate-100' : ''}`}
+                class={`block w-full border-b border-slate-100 px-4 py-3 text-left hover:bg-slate-50 ${selectedBundle?.key === bundle.key || selectedPost?.id === bundle.primaryPost.id ? 'bg-slate-100' : ''}`}
                 type="button"
-                onclick={() => (selectedSlug = post.slug)}
+                onclick={() => (selectedSlug = bundle.primaryPost.slug)}
               >
-                <span class="block truncate text-sm font-medium text-slate-950">{post.title}</span>
+                <span class="block truncate text-sm font-medium text-slate-950">
+                  {bundle.primaryPost.title}
+                </span>
                 <span class="mt-1 flex items-center gap-2 text-xs text-slate-500">
-                  <span class="rounded bg-slate-200 px-1.5 py-0.5">{post.status}</span>
-                  {#if post.isPublished}
+                  <span class="rounded bg-slate-200 px-1.5 py-0.5">{bundle.primaryPost.status}</span
+                  >
+                  {#if bundle.publishedTargets.length > 0}
                     <span class="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-800"
                       >published</span
                     >
                   {/if}
-                  <span class="truncate">{post.slug}</span>
+                  {#if bundle.posts.length > 1}
+                    <span class="rounded bg-slate-100 px-1.5 py-0.5"
+                      >{bundle.posts.length} variants</span
+                    >
+                  {/if}
+                  <span class="truncate">{bundle.primaryPost.slug}</span>
                 </span>
               </button>
             {/each}
@@ -248,11 +276,11 @@
             </p>
           {/if}
 
-          {#if relatedPosts.length > 0}
+          {#if selectedBundle && selectedBundle.posts.length > 1}
             <section class="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
-              <h3 class="text-sm font-semibold text-slate-900">Related Variants</h3>
+              <h3 class="text-sm font-semibold text-slate-900">Bundle Variants</h3>
               <div class="mt-3 space-y-2">
-                {#each relatedPosts as related (related.id)}
+                {#each selectedBundle.posts.filter((related) => related.slug !== selectedPost.slug) as related (related.id)}
                   <button
                     class="block w-full rounded border border-slate-200 bg-white px-3 py-2 text-left text-sm hover:bg-slate-100"
                     type="button"

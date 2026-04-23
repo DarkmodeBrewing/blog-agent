@@ -175,18 +175,20 @@ Status: Completed
 
 ## Phase 7: API Refactor
 
-- Add settings endpoints for:
-  - OpenAI credentials
-  - publishing targets
-  - GitHub target configuration
-  - frontmatter template configuration
-  - readiness/status
-- Refactor generation endpoints to work with content bundles and multiple outputs.
-- Refactor publish endpoints to act on a specific content item and target.
+- Status: Completed
+
+- [x] Add settings endpoints for:
+  - [x] OpenAI credentials
+  - [x] publishing targets
+  - [x] GitHub target configuration
+  - [x] frontmatter template configuration
+  - [x] readiness/status
+- [x] Refactor generation endpoints to work with content bundles and multiple outputs.
+- [x] Refactor publish endpoints to act on a specific content item and target.
   - Example shape: `/api/posts/[id]/publish` with target selection or `/api/content/[id]/publish/[target]`
-- Add export endpoint for Markdown download/render.
-- Add duplicate/copy endpoint for published items.
-- Add list/detail endpoints that return grouped content variants suitable for the new full-page post detail route.
+- [x] Add export endpoint for Markdown download/render.
+- [x] Add duplicate/copy endpoint for published items.
+- [x] Add list/detail endpoints that return grouped content variants suitable for the new full-page post detail route.
 
 ## Phase 8: Database and Drizzle Migration
 

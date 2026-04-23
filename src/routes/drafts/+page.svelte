@@ -116,6 +116,12 @@
   type PostDetailResponse = {
     post: PostRecord;
     relatedPosts: PostRecord[];
+    bundle: {
+      key: string;
+      bundleId: number | null;
+      primaryPost: PostRecord;
+      posts: PostRecord[];
+    } | null;
   };
 
   let posts = $state<PostRecord[]>([]);
@@ -259,7 +265,8 @@
       const data = await requestJson<PostDetailResponse>(
         apiUrl(`/api/posts/${encodeURIComponent(editorSlug)}`)
       );
-      editorRelatedPosts = data.relatedPosts;
+      editorRelatedPosts =
+        data.bundle?.posts.filter((post) => post.slug !== data.post.slug) ?? data.relatedPosts;
     } catch {
       editorRelatedPosts = [];
     }
@@ -461,11 +468,11 @@
 
     try {
       const data = await requestJson<{ result: PublishResult }>(
-        apiUrl(`/api/posts/${encodeURIComponent(editorSlug)}/publish`),
+        apiUrl(
+          `/api/posts/${encodeURIComponent(editorSlug)}/publish/${encodeURIComponent(selectedPublishTarget)}`
+        ),
         {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ target: selectedPublishTarget })
+          method: 'POST'
         }
       );
 
@@ -501,24 +508,55 @@
     if (!editorSlug) return;
 
     try {
-      const data = await requestJson<{ result: PublishResult }>(
-        apiUrl(`/api/posts/${encodeURIComponent(editorSlug)}/publish`),
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ target: 'markdown_download' })
-        }
-      );
+      const data = await requestJson<{
+        artifact: {
+          filename: string;
+          content: string;
+          contentType: string;
+        };
+      }>(apiUrl(`/api/posts/${encodeURIComponent(editorSlug)}/markdown`));
 
-      if (!data.result.artifact) {
+      if (!data.artifact) {
         throw new Error('No Markdown artifact returned');
       }
 
-      await navigator.clipboard.writeText(data.result.artifact.content);
+      await navigator.clipboard.writeText(data.artifact.content);
       statusMessage = `${editorSlug} copied to clipboard`;
-      await loadPosts();
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : 'Copy failed';
+    }
+  };
+
+  const downloadMarkdown = async () => {
+    if (!editorSlug) return;
+
+    try {
+      const data = await requestJson<{
+        artifact: {
+          filename: string;
+          content: string;
+          contentType: string;
+        };
+      }>(apiUrl(`/api/posts/${encodeURIComponent(editorSlug)}/markdown`));
+
+      if (!data.artifact) {
+        throw new Error('No Markdown artifact returned');
+      }
+
+      const blob = new Blob([data.artifact.content], {
+        type: data.artifact.contentType
+      });
+      const downloadUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = downloadUrl;
+      anchor.download = data.artifact.filename;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(downloadUrl);
+      statusMessage = `${editorSlug} download prepared`;
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Download failed';
     }
   };
 
@@ -912,6 +950,14 @@
             onclick={() => void copyMarkdownToClipboard()}
           >
             Copy Markdown
+          </button>
+          <button
+            class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+            disabled={!hasDraft || controlsDisabled}
+            type="button"
+            onclick={() => void downloadMarkdown()}
+          >
+            Download Markdown
           </button>
           <button
             class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
