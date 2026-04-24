@@ -14,7 +14,13 @@ type TokenUsage = {
 };
 
 type RecordTokenUsageInput = {
+  actionId?: string | null;
+  requestId?: string | null;
   sessionId: string;
+  jobId?: string | null;
+  bundleId?: number | null;
+  slug?: string | null;
+  target?: string | null;
   operation: string;
   stage: string;
   model: string;
@@ -73,11 +79,19 @@ export const recordTokenUsage = (input: RecordTokenUsageInput) => {
     logWorkflow({
       level: 'debug',
       message: 'tokens.usage.missing',
-      details: {
+      context: {
+        actionId: input.actionId ?? null,
+        requestId: input.requestId ?? null,
         sessionId: input.sessionId,
+        jobId: input.jobId ?? null,
+        bundleId: input.bundleId ?? null,
+        slug: input.slug ?? null,
+        target: input.target ?? null,
+        model: input.model
+      },
+      details: {
         operation: input.operation,
         stage: input.stage,
-        model: input.model,
         responseId: input.responseId ?? null
       }
     });
@@ -100,11 +114,19 @@ export const recordTokenUsage = (input: RecordTokenUsageInput) => {
   logWorkflow({
     level: 'info',
     message: 'tokens.usage.recorded',
-    details: {
+    context: {
+      actionId: input.actionId ?? null,
+      requestId: input.requestId ?? null,
       sessionId: input.sessionId,
+      jobId: input.jobId ?? null,
+      bundleId: input.bundleId ?? null,
+      slug: input.slug ?? null,
+      target: input.target ?? null,
+      model: input.model
+    },
+    details: {
       operation: input.operation,
       stage: input.stage,
-      model: input.model,
       responseId: input.responseId ?? null,
       inputTokens: normalizedUsage.inputTokens,
       outputTokens: normalizedUsage.outputTokens,

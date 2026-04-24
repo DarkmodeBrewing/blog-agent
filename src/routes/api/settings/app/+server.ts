@@ -7,6 +7,7 @@ import {
   logSettingsFailure,
   updateAppSettings
 } from '$lib/server/app-settings';
+import { createRequestId } from '$lib/server/workflow-log';
 
 const FrontmatterFieldSchema = z.enum([
   'title',
@@ -64,6 +65,7 @@ export const GET: RequestHandler = () => {
 };
 
 export const PUT: RequestHandler = async ({ request }) => {
+  const requestId = createRequestId();
   const body = await request.json().catch(() => undefined);
   const parsedBody = SettingsUpdateSchema.safeParse(body);
 
@@ -75,7 +77,12 @@ export const PUT: RequestHandler = async ({ request }) => {
   }
 
   try {
-    return json(updateAppSettings(parsedBody.data));
+    return json(
+      updateAppSettings(parsedBody.data, {
+        actionId: 'settings_update',
+        requestId
+      })
+    );
   } catch (cause) {
     logSettingsFailure('settings.app.update_failed', cause);
 

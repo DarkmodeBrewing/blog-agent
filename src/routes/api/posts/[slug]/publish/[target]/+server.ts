@@ -8,9 +8,10 @@ import {
   publishPost,
   type PublishTarget
 } from '$lib/server/publishing';
-import { getErrorMessage, logWorkflow } from '$lib/server/workflow-log';
+import { createRequestId, getErrorMessage, logWorkflow } from '$lib/server/workflow-log';
 
 export const POST: RequestHandler = async ({ params }) => {
+  const requestId = createRequestId();
   const parsedSlug = BlogSlugSchema.safeParse(params.slug);
   const parsedTarget = PublishTargetSchema.safeParse(params.target);
 
@@ -52,7 +53,11 @@ export const POST: RequestHandler = async ({ params }) => {
   }
 
   try {
-    const result = await publishPost(parsedSlug.data, target);
+    const actionId = `publish_${parsedSlug.data}_${target}`;
+    const result = await publishPost(parsedSlug.data, target, {
+      actionId,
+      requestId
+    });
 
     if (!result) {
       return json({ error: 'Post not found' }, { status: 404 });
@@ -63,9 +68,13 @@ export const POST: RequestHandler = async ({ params }) => {
     logWorkflow({
       level: 'error',
       message: 'post.publish.failed',
-      details: {
+      context: {
+        actionId: `publish_${parsedSlug.data}_${target}`,
+        requestId,
         slug: parsedSlug.data,
-        target,
+        target
+      },
+      details: {
         error: getErrorMessage(cause)
       }
     });

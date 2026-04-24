@@ -36,7 +36,8 @@ export type GeneratedBundleResult = {
 type GenerationOutput = (typeof GenerationOutputSchema)['_zod']['output'];
 
 export const generateContentBundle = async (
-  draftRequest: DraftRequest
+  draftRequest: DraftRequest,
+  options?: { actionId?: string; requestId?: string; jobId?: string }
 ): Promise<GeneratedBundleResult | null> => {
   const outputs: GenerationOutput[] = draftRequest.outputs.includes('blog')
     ? [
@@ -53,6 +54,13 @@ export const generateContentBundle = async (
   logWorkflow({
     level: 'info',
     message: 'generation.started',
+    context: {
+      actionId: options?.actionId ?? null,
+      requestId: options?.requestId ?? null,
+      sessionId,
+      jobId: options?.jobId ?? null,
+      model
+    },
     details: {
       topic: draftRequest.topic,
       outputs,
@@ -70,7 +78,10 @@ export const generateContentBundle = async (
   const primary = await generatePrimaryBlogDraft(draftRequest, {
     sessionId,
     model,
-    instructions
+    instructions,
+    actionId: options?.actionId ?? null,
+    requestId: options?.requestId ?? null,
+    jobId: options?.jobId ?? null
   });
 
   if (!primary) {
@@ -85,7 +96,10 @@ export const generateContentBundle = async (
     const variant = await generateDerivedVariant(output, draftRequest, primary, {
       sessionId,
       model,
-      instructions
+      instructions,
+      actionId: options?.actionId ?? null,
+      requestId: options?.requestId ?? null,
+      jobId: options?.jobId ?? null
     });
 
     variants.push(variant);
@@ -99,7 +113,14 @@ export const generateContentBundle = async (
 
 const generatePrimaryBlogDraft = async (
   draftRequest: DraftRequest,
-  context: { sessionId: string; model: string; instructions: string }
+  context: {
+    sessionId: string;
+    model: string;
+    instructions: string;
+    actionId?: string | null;
+    requestId?: string | null;
+    jobId?: string | null;
+  }
 ): Promise<GeneratedDraft | null> => {
   const input = buildPrimaryDraftInput(draftRequest);
   const draftSchema = createGeneratedDraftSchema(
@@ -113,6 +134,13 @@ const generatePrimaryBlogDraft = async (
     logWorkflow({
       level: 'info',
       message: 'generation.references.selected',
+      context: {
+        actionId: context.actionId ?? null,
+        requestId: context.requestId ?? null,
+        sessionId: context.sessionId,
+        jobId: context.jobId ?? null,
+        model: context.model
+      },
       details: {
         slugs: allowedReferenceSlugs
       }
@@ -140,7 +168,10 @@ const generatePrimaryBlogDraft = async (
       }
     });
     recordTokenUsage({
+      actionId: context.actionId ?? null,
+      requestId: context.requestId ?? null,
       sessionId: context.sessionId,
+      jobId: context.jobId ?? null,
       operation: 'bundle_generation',
       stage: 'primary_blog_initial_response',
       model: context.model,
@@ -151,9 +182,15 @@ const generatePrimaryBlogDraft = async (
     logWorkflow({
       level: 'error',
       message: 'generation.failed',
+      context: {
+        actionId: context.actionId ?? null,
+        requestId: context.requestId ?? null,
+        sessionId: context.sessionId,
+        jobId: context.jobId ?? null,
+        model: context.model
+      },
       details: {
         stage: 'primary_blog_initial_response',
-        sessionId: context.sessionId,
         error: getErrorMessage(cause)
       }
     });
@@ -172,11 +209,17 @@ const generatePrimaryBlogDraft = async (
       logWorkflow({
         level: response.output_parsed ? 'info' : 'warn',
         message: 'generation.primary.completed',
+        context: {
+          actionId: context.actionId ?? null,
+          requestId: context.requestId ?? null,
+          sessionId: context.sessionId,
+          jobId: context.jobId ?? null,
+          slug: response.output_parsed?.slug ?? null,
+          model: context.model
+        },
         details: {
-          model: context.model,
           parsed: Boolean(response.output_parsed),
-          responseId: response.id,
-          sessionId: context.sessionId
+          responseId: response.id
         }
       });
 
@@ -218,7 +261,10 @@ const generatePrimaryBlogDraft = async (
         }
       });
       recordTokenUsage({
+        actionId: context.actionId ?? null,
+        requestId: context.requestId ?? null,
         sessionId: context.sessionId,
+        jobId: context.jobId ?? null,
         operation: 'bundle_generation',
         stage: `primary_blog_tool_followup_${iteration + 1}`,
         model: context.model,
@@ -229,9 +275,15 @@ const generatePrimaryBlogDraft = async (
       logWorkflow({
         level: 'error',
         message: 'generation.failed',
+        context: {
+          actionId: context.actionId ?? null,
+          requestId: context.requestId ?? null,
+          sessionId: context.sessionId,
+          jobId: context.jobId ?? null,
+          model: context.model
+        },
         details: {
           stage: 'primary_blog_tool_followup',
-          sessionId: context.sessionId,
           iteration,
           error: getErrorMessage(cause)
         }
@@ -248,7 +300,14 @@ const generateDerivedVariant = async (
   platform: 'x' | 'linkedin',
   draftRequest: DraftRequest,
   primary: GeneratedDraft,
-  context: { sessionId: string; model: string; instructions: string }
+  context: {
+    sessionId: string;
+    model: string;
+    instructions: string;
+    actionId?: string | null;
+    requestId?: string | null;
+    jobId?: string | null;
+  }
 ) => {
   const input = buildDerivedSocialInput({
     platform,
@@ -274,7 +333,11 @@ const generateDerivedVariant = async (
       }
     });
     recordTokenUsage({
+      actionId: context.actionId ?? null,
+      requestId: context.requestId ?? null,
       sessionId: context.sessionId,
+      jobId: context.jobId ?? null,
+      slug: primary.slug,
       operation: 'bundle_generation',
       stage: `derived_${platform}_response`,
       model: context.model,
@@ -285,9 +348,16 @@ const generateDerivedVariant = async (
     logWorkflow({
       level: 'error',
       message: 'generation.failed',
+      context: {
+        actionId: context.actionId ?? null,
+        requestId: context.requestId ?? null,
+        sessionId: context.sessionId,
+        jobId: context.jobId ?? null,
+        slug: primary.slug,
+        model: context.model
+      },
       details: {
         stage: `derived_${platform}_response`,
-        sessionId: context.sessionId,
         error: getErrorMessage(cause)
       }
     });
@@ -313,11 +383,18 @@ const generateDerivedVariant = async (
   logWorkflow({
     level: 'info',
     message: 'generation.variant.completed',
+    context: {
+      actionId: context.actionId ?? null,
+      requestId: context.requestId ?? null,
+      sessionId: context.sessionId,
+      jobId: context.jobId ?? null,
+      slug: primary.slug,
+      model: context.model
+    },
     details: {
       parentSlug: primary.slug,
       platform,
-      responseId: response.id,
-      sessionId: context.sessionId
+      responseId: response.id
     }
   });
 

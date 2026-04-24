@@ -48,6 +48,7 @@ export const getGenerationJob = (id: string) => {
 
 export const createGenerationJob = (request: DraftRequest) => {
   const id = randomUUID();
+  const actionId = `generate_${id.slice(0, 12)}`;
 
   insertGenerationJobRow({
     id,
@@ -58,6 +59,10 @@ export const createGenerationJob = (request: DraftRequest) => {
   logWorkflow({
     level: 'info',
     message: 'generation.job.queued',
+    context: {
+      actionId,
+      jobId: id
+    },
     details: {
       jobId: id,
       topic: request.topic,
@@ -68,7 +73,7 @@ export const createGenerationJob = (request: DraftRequest) => {
   });
 
   queueMicrotask(() => {
-    void runGenerationJob(id);
+    void runGenerationJob(id, actionId);
   });
 
   return getGenerationJob(id);
@@ -85,7 +90,7 @@ const updateGenerationJobStatus = (
   updateGenerationJobRow(id, input);
 };
 
-export const runGenerationJob = async (id: string) => {
+export const runGenerationJob = async (id: string, actionId?: string) => {
   if (runningJobs.has(id)) return;
 
   const job = getGenerationJob(id);
@@ -98,8 +103,11 @@ export const runGenerationJob = async (id: string) => {
   logWorkflow({
     level: 'info',
     message: 'generation.job.started',
+    context: {
+      actionId: actionId ?? null,
+      jobId: id
+    },
     details: {
-      jobId: id,
       topic: job.request.topic,
       outputs: job.request.outputs,
       desiredLength: job.request.desiredLength
@@ -121,8 +129,12 @@ export const runGenerationJob = async (id: string) => {
     logWorkflow({
       level: 'info',
       message: 'generation.job.completed',
-      details: {
+      context: {
+        actionId: actionId ?? null,
         jobId: id,
+        slug: bundle.primary.slug
+      },
+      details: {
         draftSlug: bundle.primary.slug,
         title: bundle.primary.title,
         variantCount: bundle.variants.length
@@ -139,8 +151,11 @@ export const runGenerationJob = async (id: string) => {
     logWorkflow({
       level: 'error',
       message: 'generation.job.failed',
+      context: {
+        actionId: actionId ?? null,
+        jobId: id
+      },
       details: {
-        jobId: id,
         error
       }
     });

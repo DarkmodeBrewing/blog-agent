@@ -441,8 +441,12 @@ export const getReadiness = (): AppReadiness => {
   };
 };
 
-export const updateAppSettings = (input: AppSettingsUpdateInput) => {
+export const updateAppSettings = (
+  input: AppSettingsUpdateInput,
+  options?: { actionId?: string | null; requestId?: string | null }
+) => {
   const existing = getAppSettingsSnapshot();
+  const previousReadiness = getReadiness();
 
   const openaiModels = [
     ...new Set(input.openai.models.map((model) => model.trim()).filter(Boolean))
@@ -488,18 +492,30 @@ export const updateAppSettings = (input: AppSettingsUpdateInput) => {
   );
 
   const updated = getAppSettingsSnapshot();
+  const nextReadiness = getReadiness();
 
   logWorkflow({
     level: 'info',
     message: 'settings.app.updated',
+    context: {
+      actionId: options?.actionId ?? 'settings_update',
+      requestId: options?.requestId ?? null
+    },
     details: {
       openaiConfigured: updated.openai.apiKeyConfigured,
       previousOpenAIConfigured: existing.openai.apiKeyConfigured,
       selectedModel: updated.openai.selectedModel,
+      previousSelectedModel: existing.openai.selectedModel,
       githubEnabled: updated.github.enabled,
+      previousGitHubEnabled: existing.github.enabled,
       githubConfigured: updated.github.tokenConfigured,
       markdownDownloadEnabled: updated.markdownExport.downloadEnabled,
       markdownDiskExportEnabled: updated.markdownExport.diskExportEnabled,
+      readinessStatus: nextReadiness.status,
+      previousReadinessStatus: previousReadiness.status,
+      blockingIssues: nextReadiness.issues
+        .filter((issue) => issue.severity === 'error')
+        .map((issue) => issue.id),
       frontmatterFieldsEnabled: Object.entries(updated.frontmatter)
         .filter(([key, enabled]) => key !== 'defaults' && key !== 'order' && enabled)
         .map(([key]) => key)
@@ -508,7 +524,7 @@ export const updateAppSettings = (input: AppSettingsUpdateInput) => {
 
   return {
     settings: updated,
-    readiness: getReadiness()
+    readiness: nextReadiness
   };
 };
 
@@ -525,6 +541,9 @@ export const logSettingsFailure = (message: string, cause: unknown) => {
   logWorkflow({
     level: 'error',
     message,
+    context: {
+      actionId: 'settings_update'
+    },
     details: {
       error: getErrorMessage(cause)
     }

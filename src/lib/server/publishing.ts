@@ -144,7 +144,10 @@ export const renderPostAsMarkdown = (post: PostRecord) => {
   };
 };
 
-const publishMarkdownDownload = (post: PostRecord): PublishResult => {
+const publishMarkdownDownload = (
+  post: PostRecord,
+  options?: { actionId?: string | null; requestId?: string | null }
+): PublishResult => {
   const artifact = renderPostAsMarkdown(post);
   const publishedPost = recordPostPublication(post.slug, {
     target: 'markdown_download',
@@ -159,9 +162,13 @@ const publishMarkdownDownload = (post: PostRecord): PublishResult => {
   logWorkflow({
     level: 'info',
     message: 'post.publish.completed',
-    details: {
+    context: {
+      actionId: options?.actionId ?? null,
+      requestId: options?.requestId ?? null,
       slug: post.slug,
-      target: 'markdown_download',
+      target: 'markdown_download'
+    },
+    details: {
       filename: artifact.filename,
       contentLength: artifact.content.length
     }
@@ -174,7 +181,10 @@ const publishMarkdownDownload = (post: PostRecord): PublishResult => {
   };
 };
 
-const publishMarkdownDiskExport = (post: PostRecord): PublishResult => {
+const publishMarkdownDiskExport = (
+  post: PostRecord,
+  options?: { actionId?: string | null; requestId?: string | null }
+): PublishResult => {
   const settings = getMarkdownExportSettings();
 
   if (!settings.diskExportEnabled) {
@@ -204,9 +214,13 @@ const publishMarkdownDiskExport = (post: PostRecord): PublishResult => {
   logWorkflow({
     level: 'info',
     message: 'post.publish.completed',
-    details: {
+    context: {
+      actionId: options?.actionId ?? null,
+      requestId: options?.requestId ?? null,
       slug: post.slug,
-      target: 'markdown_disk_export',
+      target: 'markdown_disk_export'
+    },
+    details: {
       filePath,
       contentLength: artifact.content.length
     }
@@ -220,7 +234,10 @@ const publishMarkdownDiskExport = (post: PostRecord): PublishResult => {
   };
 };
 
-const publishGitHubRepo = async (post: PostRecord): Promise<PublishResult> => {
+const publishGitHubRepo = async (
+  post: PostRecord,
+  options?: { actionId?: string | null; requestId?: string | null }
+): Promise<PublishResult> => {
   const octokit = getOctokit();
   const config = getGitHubRepoConfig();
   const path = post.githubPath ?? `${config.blogPostPath}/${post.slug}.md`;
@@ -229,10 +246,14 @@ const publishGitHubRepo = async (post: PostRecord): Promise<PublishResult> => {
   logWorkflow({
     level: 'info',
     message: 'post.publish.started',
-    details: {
+    context: {
+      actionId: options?.actionId ?? null,
+      requestId: options?.requestId ?? null,
       slug: post.slug,
+      target: 'github_repo'
+    },
+    details: {
       title: post.title,
-      target: 'github_repo',
       path,
       repo: `${config.owner}/${config.repo}`,
       ref: config.ref
@@ -287,9 +308,13 @@ const publishGitHubRepo = async (post: PostRecord): Promise<PublishResult> => {
   logWorkflow({
     level: 'info',
     message: 'post.publish.completed',
-    details: {
+    context: {
+      actionId: options?.actionId ?? null,
+      requestId: options?.requestId ?? null,
       slug: publishedPost.slug,
-      target: 'github_repo',
+      target: 'github_repo'
+    },
+    details: {
       path,
       sha: result.data.content?.sha ?? currentSha ?? null,
       commitSha: result.data.commit.sha,
@@ -351,7 +376,8 @@ export const isPublishTargetReady = (target: PublishTarget) => {
 
 export const publishPost = async (
   slug: string,
-  target: PublishTarget = 'markdown_download'
+  target: PublishTarget = 'markdown_download',
+  options?: { actionId?: string | null; requestId?: string | null }
 ): Promise<PublishResult | null> => {
   const definition = publishTargetDefinitions.find((item) => item.id === target);
   if (!definition) {
@@ -372,17 +398,32 @@ export const publishPost = async (
     return null;
   }
 
+  logWorkflow({
+    level: 'info',
+    message: 'post.publish.attempted',
+    context: {
+      actionId: options?.actionId ?? null,
+      requestId: options?.requestId ?? null,
+      slug,
+      target
+    },
+    details: {
+      editable: post.isEditable,
+      publishedTargets: post.publicationSummary.publishedTargets
+    }
+  });
+
   if (post.status !== 'approved') {
     throw new Error(`Post must be approved before publishing. Current status: ${post.status}`);
   }
 
   switch (target) {
     case 'markdown_download':
-      return publishMarkdownDownload(post);
+      return publishMarkdownDownload(post, options);
     case 'markdown_disk_export':
-      return publishMarkdownDiskExport(post);
+      return publishMarkdownDiskExport(post, options);
     case 'github_repo':
-      return publishGitHubRepo(post);
+      return publishGitHubRepo(post, options);
     default:
       throw new Error(`Publish target is not implemented yet: ${target}`);
   }

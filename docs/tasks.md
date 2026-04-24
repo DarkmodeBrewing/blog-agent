@@ -14,7 +14,7 @@ This document breaks the requested changes into implementation phases in the ord
 - [x] Phase 8: Database and Drizzle migration
 - [x] Phase 9: UI refactor
 - [x] Phase 10: Accessibility, usability, and responsive pass
-- [ ] Phase 11: Logging and observability adjustments
+- [x] Phase 11: Logging and observability adjustments
 - [ ] Phase 12: Cleanup and documentation
 
 ## Phase 0: Decisions and Constraints
@@ -266,15 +266,17 @@ Status: Completed
 
 ## Phase 11: Logging and Observability Adjustments
 
-- Expand logging to cover:
-  - settings completeness changes
-  - adapter enable/disable events
-  - content bundle generation
-  - per-variant generation stages
-  - per-target publish attempts
-  - export actions
-- Redact secrets consistently.
-- Add enough structured metadata to trace one user action across generation and publishing.
+- Status: Completed
+
+- [x] Expand logging to cover:
+  - [x] settings completeness changes
+  - [x] adapter enable/disable events
+  - [x] content bundle generation
+  - [x] per-variant generation stages
+  - [x] per-target publish attempts
+  - [x] export actions
+- [x] Redact secrets consistently.
+- [x] Add enough structured metadata to trace one user action across generation and publishing.
 
 ## Phase 12: Cleanup and Documentation
 

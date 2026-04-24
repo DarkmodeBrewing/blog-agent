@@ -7,7 +7,10 @@ export type LogEvent = {
   level: LogLevel;
   message: string;
   timestamp: string;
-  details?: unknown;
+  details?: {
+    context?: Record<string, unknown>;
+    details?: Record<string, unknown>;
+  } | null;
 };
 
 type LogSubscriber = (event: LogEvent) => void;
