@@ -1,4 +1,4 @@
-import { desc, eq, sql } from 'drizzle-orm';
+import { desc, eq, inArray, sql } from 'drizzle-orm';
 import { getDatabase } from '../database';
 import {
   contentBundles,
@@ -57,6 +57,19 @@ export const selectPublicationRowsForPost = (postId: number) => {
     .select()
     .from(postPublications)
     .where(eq(postPublications.postId, postId))
+    .orderBy(desc(postPublications.updatedAt))
+    .all();
+};
+
+export const selectPublicationRowsForPosts = (postIds: number[]) => {
+  if (postIds.length === 0) {
+    return [];
+  }
+
+  return getDatabase()
+    .select()
+    .from(postPublications)
+    .where(inArray(postPublications.postId, postIds))
     .orderBy(desc(postPublications.updatedAt))
     .all();
 };

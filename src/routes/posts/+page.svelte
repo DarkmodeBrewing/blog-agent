@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
   import { apiUrl, requestJson } from '$lib/client/request-json';
+  import { formatTimestamp } from '$lib/time';
 
   type PostStatus = 'synced' | 'draft' | 'approved' | 'committed' | 'rejected';
 
@@ -45,7 +47,14 @@
     readyForGitHubSync: boolean;
   };
 
-  const statuses: Array<PostStatus | 'all'> = ['all', 'draft', 'approved', 'synced', 'rejected'];
+  const statuses: Array<PostStatus | 'all'> = [
+    'all',
+    'draft',
+    'approved',
+    'committed',
+    'synced',
+    'rejected'
+  ];
 
   let bundles = $state<PostBundle[]>([]);
   let appReadiness = $state<AppReadiness | null>(null);
@@ -106,6 +115,9 @@
 
   $effect(() => {
     void loadPosts();
+  });
+
+  onMount(() => {
     void loadReadiness();
   });
 </script>
@@ -155,7 +167,7 @@
         </button>
         <button
           class="rounded-md bg-cyan-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-          disabled={syncing || (appReadiness ? !appReadiness.readyForGitHubSync : false)}
+          disabled={syncing || !appReadiness?.readyForGitHubSync}
           type="button"
           onclick={() => void syncPosts()}
         >
@@ -244,9 +256,7 @@
                   {/if}
                 </td>
                 <td class="px-4 py-3 text-slate-700">{bundle.primaryPost.source}</td>
-                <td class="px-4 py-3 text-slate-700">
-                  {new Date(bundle.updatedAt).toLocaleString()}
-                </td>
+                <td class="px-4 py-3 text-slate-700">{formatTimestamp(bundle.updatedAt)}</td>
                 <td class="px-4 py-3 text-slate-700">{bundle.posts.length}</td>
               </tr>
             {/each}

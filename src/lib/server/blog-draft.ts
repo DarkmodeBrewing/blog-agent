@@ -6,8 +6,7 @@ import {
   type BlogFrontmatterPreference,
   type DraftRequest,
   type GeneratedDraft,
-  type GeneratedSocialVariant,
-  type GenerationOutputSchema
+  type GeneratedSocialVariant
 } from '../../openai/model';
 import { buildDerivedSocialInput, buildPrimaryDraftInput } from '../../openai/prompts';
 import { existingPostToolSchema, invokeTool } from './invoke-tool-call';
@@ -33,7 +32,7 @@ export type GeneratedBundleResult = {
   variants: GeneratedSocialVariant[];
 };
 
-type GenerationOutput = (typeof GenerationOutputSchema)['_zod']['output'];
+type GenerationOutput = DraftRequest['outputs'][number];
 
 export const generateContentBundle = async (
   draftRequest: DraftRequest,

@@ -2,6 +2,7 @@
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
   import { apiUrl, requestJson } from '$lib/client/request-json';
+  import { formatTimestamp } from '$lib/time';
 
   type PostStatus = 'synced' | 'draft' | 'approved' | 'committed' | 'rejected';
 
@@ -171,7 +172,7 @@
             </div>
             <div>
               <dt class="text-slate-500">Updated</dt>
-              <dd class="text-slate-900">{new Date(currentPost.updatedAt).toLocaleString()}</dd>
+              <dd class="text-slate-900">{formatTimestamp(currentPost.updatedAt)}</dd>
             </div>
           </dl>
         </section>

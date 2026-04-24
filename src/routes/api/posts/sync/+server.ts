@@ -10,7 +10,7 @@ export const POST: RequestHandler = async () => {
   if (!readiness.readyForGitHubSync) {
     return json(
       {
-        error: 'GitHub publishing settings are incomplete',
+        error: 'GitHub sync settings are incomplete',
         readiness
       },
       { status: 409 }

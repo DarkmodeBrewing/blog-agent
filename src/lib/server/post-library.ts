@@ -9,6 +9,7 @@ import {
   insertPostStatusEvent,
   selectChildPostRows,
   selectPublicationRowsForPost,
+  selectPublicationRowsForPosts,
   selectPostRowById,
   selectPostRowBySlug,
   selectPostRows,
@@ -115,6 +116,16 @@ type UpsertPostInput = {
   statusNotes?: string;
 };
 
+const normalizeTimestamp = (value: string | null) => {
+  if (!value) {
+    return null;
+  }
+
+  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)
+    ? `${value.replace(' ', 'T')}Z`
+    : value;
+};
+
 const mapPublicationRow = (row: PostPublicationRow): PostPublicationRecord => ({
   id: row.id,
   postId: row.postId,
@@ -126,13 +137,31 @@ const mapPublicationRow = (row: PostPublicationRow): PostPublicationRecord => ({
   commitSha: row.commitSha,
   artifact: row.artifactJson ? (JSON.parse(row.artifactJson) as Record<string, unknown>) : null,
   error: row.error,
-  createdAt: row.createdAt,
-  publishedAt: row.publishedAt,
-  updatedAt: row.updatedAt
+  createdAt: normalizeTimestamp(row.createdAt) ?? row.createdAt,
+  publishedAt: normalizeTimestamp(row.publishedAt),
+  updatedAt: normalizeTimestamp(row.updatedAt) ?? row.updatedAt
 });
 
 const listPostPublications = (postId: number) => {
   return selectPublicationRowsForPost(postId).map(mapPublicationRow);
+};
+
+const mapPublicationRowsByPostId = (rows: PostRow[]) => {
+  const publicationsByPostId = new Map<number, PostPublicationRecord[]>();
+
+  for (const publication of selectPublicationRowsForPosts(rows.map((row) => row.id)).map(
+    mapPublicationRow
+  )) {
+    const existing = publicationsByPostId.get(publication.postId);
+
+    if (existing) {
+      existing.push(publication);
+    } else {
+      publicationsByPostId.set(publication.postId, [publication]);
+    }
+  }
+
+  return publicationsByPostId;
 };
 
 const getPublicationSummary = (publications: PostPublicationRecord[]): PublicationSummary => {
@@ -151,8 +180,11 @@ const getPublicationSummary = (publications: PostPublicationRecord[]): Publicati
   };
 };
 
-const mapPostRow = (row: PostRow): PostRecord => {
-  const publications = listPostPublications(row.id);
+const mapPostRow = (
+  row: PostRow,
+  publicationsByPostId?: Map<number, PostPublicationRecord[]>
+): PostRecord => {
+  const publications = publicationsByPostId?.get(row.id) ?? listPostPublications(row.id);
   const publicationSummary = getPublicationSummary(publications);
   const isPublished = publicationSummary.publishedTargets.length > 0;
   const isEditable = !row.lockedAt && !isPublished;
@@ -173,14 +205,19 @@ const mapPostRow = (row: PostRow): PostRecord => {
     githubPath: row.githubPath,
     githubSha: row.githubSha,
     source: row.source,
-    lockedAt: row.lockedAt,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
+    lockedAt: normalizeTimestamp(row.lockedAt),
+    createdAt: normalizeTimestamp(row.createdAt) ?? row.createdAt,
+    updatedAt: normalizeTimestamp(row.updatedAt) ?? row.updatedAt,
     publications,
     publicationSummary,
     isPublished,
     isEditable
   };
+};
+
+const mapPostRows = (rows: PostRow[]) => {
+  const publicationsByPostId = mapPublicationRowsByPostId(rows);
+  return rows.map((row) => mapPostRow(row, publicationsByPostId));
 };
 
 const getStringField = (data: Record<string, unknown>, key: string) => {
@@ -198,7 +235,7 @@ const getStringArrayField = (data: Record<string, unknown>, key: string) => {
 };
 
 export const listPosts = (status?: PostStatus) => {
-  return selectPostRows(status).map(mapPostRow);
+  return mapPostRows(selectPostRows(status));
 };
 
 export const getPostBySlug = (slug: string) => {
@@ -210,7 +247,7 @@ export const getPostBySlug = (slug: string) => {
 export const getPostsByBundleId = (bundleId: number, excludeSlug?: string) => {
   const rows = selectPostRowsByBundleId(bundleId);
 
-  return rows.map(mapPostRow).filter((post) => (excludeSlug ? post.slug !== excludeSlug : true));
+  return mapPostRows(rows).filter((post) => (excludeSlug ? post.slug !== excludeSlug : true));
 };
 
 export const getRelatedPosts = (slug: string) => {
@@ -236,7 +273,7 @@ export const getRelatedPosts = (slug: string) => {
 
   const childRows = selectChildPostRows(post.id);
 
-  related.push(...childRows.map(mapPostRow));
+  related.push(...mapPostRows(childRows));
 
   return related.filter((relatedPost, index, collection) => {
     return (
@@ -724,9 +761,7 @@ export const recordPostPublication = (
     filePath: input.filePath ?? null,
     commitSha: input.commitSha ?? null,
     artifactJson: input.artifact ? JSON.stringify(input.artifact) : null,
-    error: input.error ?? null,
-    publishedAt: input.status === 'published' ? new Date().toISOString() : null,
-    updatedAt: new Date().toISOString()
+    error: input.error ?? null
   });
 
   if (input.status === 'published') {
