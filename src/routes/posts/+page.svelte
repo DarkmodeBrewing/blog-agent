@@ -1,19 +1,50 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import { resolve } from '$app/paths';
   import { apiUrl, requestJson } from '$lib/client/request-json';
+  import { formatTimestamp } from '$lib/time';
 
   type PostStatus = 'synced' | 'draft' | 'approved' | 'committed' | 'rejected';
 
   type PostRecord = {
     id: number;
+    bundleId: number | null;
     slug: string;
     title: string;
     ingress: string | null;
     body: string;
     tags: string[];
     status: PostStatus;
+    contentType: 'blog' | 'x' | 'linkedin' | 'instagram' | 'generic';
+    variantRole: 'primary' | 'derived' | 'standalone';
     source: 'github' | 'generated' | 'manual';
     githubPath: string | null;
+    lockedAt: string | null;
     updatedAt: string;
+    publicationSummary: {
+      total: number;
+      publishedTargets: string[];
+      failedTargets: string[];
+      latestPublishedAt: string | null;
+      latestTarget: string | null;
+    };
+    isPublished: boolean;
+    isEditable: boolean;
+  };
+
+  type PostBundle = {
+    key: string;
+    bundleId: number | null;
+    primaryPost: PostRecord;
+    posts: PostRecord[];
+    contentTypes: Array<PostRecord['contentType']>;
+    editorialStatuses: PostStatus[];
+    publishedTargets: string[];
+    updatedAt: string;
+  };
+
+  type AppReadiness = {
+    readyForGitHubSync: boolean;
   };
 
   const statuses: Array<PostStatus | 'all'> = [
@@ -25,31 +56,43 @@
     'rejected'
   ];
 
-  let posts = $state<PostRecord[]>([]);
+  let bundles = $state<PostBundle[]>([]);
+  let appReadiness = $state<AppReadiness | null>(null);
   let selectedStatus = $state<PostStatus | 'all'>('all');
-  let selectedSlug = $state<string | null>(null);
+  let selectedContentType = $state<PostRecord['contentType'] | 'all'>('all');
   let loading = $state(false);
   let syncing = $state(false);
   let statusMessage = $state('');
   let errorMessage = $state('');
 
-  let selectedPost = $derived(posts.find((post) => post.slug === selectedSlug) ?? posts[0] ?? null);
+  let visibleBundles = $derived(
+    bundles.filter((bundle) =>
+      selectedContentType === 'all' ? true : bundle.contentTypes.includes(selectedContentType)
+    )
+  );
 
   const loadPosts = async () => {
     loading = true;
     errorMessage = '';
     try {
       const query = selectedStatus === 'all' ? '' : `?status=${selectedStatus}`;
-      const data = await requestJson<{ posts: PostRecord[] }>(apiUrl(`/api/posts${query}`));
-      posts = data.posts;
-
-      if (selectedSlug && !posts.some((post) => post.slug === selectedSlug)) {
-        selectedSlug = posts[0]?.slug ?? null;
-      }
+      const data = await requestJson<{ bundles: PostBundle[] }>(apiUrl(`/api/posts${query}`));
+      bundles = data.bundles;
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : 'Failed to load posts';
     } finally {
       loading = false;
+    }
+  };
+
+  const loadReadiness = async () => {
+    try {
+      const data = await requestJson<{ readiness: AppReadiness }>(
+        apiUrl('/api/settings/readiness')
+      );
+      appReadiness = data.readiness;
+    } catch {
+      appReadiness = null;
     }
   };
 
@@ -73,6 +116,10 @@
   $effect(() => {
     void loadPosts();
   });
+
+  onMount(() => {
+    void loadReadiness();
+  });
 </script>
 
 <svelte:head>
@@ -88,13 +135,27 @@
       </div>
 
       <div class="flex flex-wrap items-center gap-2">
+        <label class="sr-only" for="post-status-filter">Status</label>
         <select
+          id="post-status-filter"
           class="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
           bind:value={selectedStatus}
         >
           {#each statuses as status (status)}
             <option value={status}>{status}</option>
           {/each}
+        </select>
+        <label class="sr-only" for="post-type-filter">Content type</label>
+        <select
+          id="post-type-filter"
+          class="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+          bind:value={selectedContentType}
+        >
+          <option value="all">all types</option>
+          <option value="blog">blog</option>
+          <option value="x">x</option>
+          <option value="linkedin">linkedin</option>
+          <option value="generic">generic</option>
         </select>
         <button
           class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
@@ -106,7 +167,7 @@
         </button>
         <button
           class="rounded-md bg-cyan-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-          disabled={syncing}
+          disabled={syncing || !appReadiness?.readyForGitHubSync}
           type="button"
           onclick={() => void syncPosts()}
         >
@@ -129,63 +190,79 @@
       </p>
     {/if}
 
-    <div class="grid min-h-[34rem] lg:grid-cols-[24rem_minmax(0,1fr)]">
-      <div class="border-b border-slate-200 lg:border-r lg:border-b-0">
-        {#if loading}
-          <p class="p-4 text-sm text-slate-500">Loading posts...</p>
-        {:else if posts.length === 0}
-          <p class="p-4 text-sm text-slate-500">No posts found.</p>
-        {:else}
-          <div class="max-h-[42rem] overflow-auto">
-            {#each posts as post (post.id)}
-              <button
-                class={`block w-full border-b border-slate-100 px-4 py-3 text-left hover:bg-slate-50 ${selectedPost?.id === post.id ? 'bg-slate-100' : ''}`}
-                type="button"
-                onclick={() => (selectedSlug = post.slug)}
-              >
-                <span class="block truncate text-sm font-medium text-slate-950">{post.title}</span>
-                <span class="mt-1 flex items-center gap-2 text-xs text-slate-500">
-                  <span class="rounded bg-slate-200 px-1.5 py-0.5">{post.status}</span>
-                  <span class="truncate">{post.slug}</span>
-                </span>
-              </button>
+    {#if loading}
+      <p class="p-4 text-sm text-slate-500">Loading posts...</p>
+    {:else if visibleBundles.length === 0}
+      <p class="p-4 text-sm text-slate-500">No posts found.</p>
+    {:else}
+      <div class="overflow-x-auto">
+        <table class="w-full min-w-[70rem] text-left text-sm">
+          <caption class="sr-only">
+            Bundled post library with content types, editorial state, publishing state, source, and
+            update time.
+          </caption>
+          <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+            <tr>
+              <th class="px-4 py-3" scope="col">Title</th>
+              <th class="px-4 py-3" scope="col">Types</th>
+              <th class="px-4 py-3" scope="col">Editorial</th>
+              <th class="px-4 py-3" scope="col">Published</th>
+              <th class="px-4 py-3" scope="col">Source</th>
+              <th class="px-4 py-3" scope="col">Updated</th>
+              <th class="px-4 py-3" scope="col">Variants</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each visibleBundles as bundle (bundle.key)}
+              <tr class="border-t border-slate-100 align-top">
+                <td class="px-4 py-3">
+                  <a
+                    class="font-medium text-slate-950 hover:underline"
+                    href={resolve(`/posts/${encodeURIComponent(bundle.primaryPost.slug)}`)}
+                  >
+                    {bundle.primaryPost.title}
+                  </a>
+                  <div class="mt-1 text-xs text-slate-500">{bundle.primaryPost.slug}</div>
+                </td>
+                <td class="px-4 py-3">
+                  <div class="flex flex-wrap gap-1.5">
+                    {#each bundle.contentTypes as contentType (contentType)}
+                      <span class="rounded bg-slate-100 px-2 py-1 text-xs text-slate-700">
+                        {contentType}
+                      </span>
+                    {/each}
+                  </div>
+                </td>
+                <td class="px-4 py-3">
+                  <div class="flex flex-wrap gap-1.5">
+                    {#each bundle.editorialStatuses as status (status)}
+                      <span class="rounded bg-slate-100 px-2 py-1 text-xs text-slate-700">
+                        {status}
+                      </span>
+                    {/each}
+                  </div>
+                </td>
+                <td class="px-4 py-3">
+                  {#if bundle.publishedTargets.length === 0}
+                    <span class="text-slate-500">None</span>
+                  {:else}
+                    <div class="flex flex-wrap gap-1.5">
+                      {#each bundle.publishedTargets as target (target)}
+                        <span class="rounded bg-emerald-50 px-2 py-1 text-xs text-emerald-800">
+                          {target}
+                        </span>
+                      {/each}
+                    </div>
+                  {/if}
+                </td>
+                <td class="px-4 py-3 text-slate-700">{bundle.primaryPost.source}</td>
+                <td class="px-4 py-3 text-slate-700">{formatTimestamp(bundle.updatedAt)}</td>
+                <td class="px-4 py-3 text-slate-700">{bundle.posts.length}</td>
+              </tr>
             {/each}
-          </div>
-        {/if}
+          </tbody>
+        </table>
       </div>
-
-      <article class="p-4">
-        {#if selectedPost}
-          <div class="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 class="text-xl font-semibold text-slate-950">{selectedPost.title}</h2>
-              <p class="mt-1 text-sm text-slate-500">{selectedPost.slug}</p>
-            </div>
-            <span class="rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
-              {selectedPost.status}
-            </span>
-          </div>
-
-          {#if selectedPost.ingress}
-            <p class="mt-4 rounded-md bg-slate-50 p-3 text-sm leading-6 text-slate-700">
-              {selectedPost.ingress}
-            </p>
-          {/if}
-
-          <div class="mt-4 flex flex-wrap gap-2">
-            {#each selectedPost.tags as tag (tag)}
-              <span class="rounded bg-cyan-50 px-2 py-1 text-xs font-medium text-cyan-800"
-                >{tag}</span
-              >
-            {/each}
-          </div>
-
-          <pre
-            class="mt-4 max-h-[32rem] overflow-auto rounded-md bg-slate-950 p-4 text-sm leading-6 whitespace-pre-wrap text-slate-100">{selectedPost.body}</pre>
-        {:else}
-          <p class="text-sm text-slate-500">Select a post.</p>
-        {/if}
-      </article>
-    </div>
+    {/if}
   </section>
 </div>

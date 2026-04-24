@@ -3,4 +3,35 @@
 :root {
   --color_header_bg: #101820;
   --color_header_fg: #e2e8f0;
+  --color_focus_ring: #0f766e;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color_focus_ring);
+  outline-offset: 2px;
+}
+
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -3rem;
+  z-index: 50;
+  border-radius: 0.375rem;
+  background: #ffffff;
+  color: #0f172a;
+  padding: 0.5rem 0.75rem;
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+}
+
+.skip-link:focus {
+  top: 1rem;
 }

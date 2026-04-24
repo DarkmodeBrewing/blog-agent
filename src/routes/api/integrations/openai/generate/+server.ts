@@ -1,9 +1,22 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { DraftRequestSchema } from '../../../../../openai/model';
+import { getReadiness } from '$lib/server/app-settings';
 import { createGenerationJob } from '$lib/server/generation-jobs';
 
 export const POST: RequestHandler = async ({ request }) => {
+  const readiness = getReadiness();
+
+  if (!readiness.readyForGeneration) {
+    return json(
+      {
+        error: 'Application setup is incomplete',
+        readiness
+      },
+      { status: 409 }
+    );
+  }
+
   const requestBody = await request.json().catch(() => undefined);
   const parsedBody = DraftRequestSchema.safeParse(requestBody);
 

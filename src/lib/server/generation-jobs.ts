@@ -1,78 +1,79 @@
 import { randomUUID } from 'node:crypto';
 import type { DraftRequest } from '../../openai/model';
-import { generateBlogDraft } from './blog-draft';
-import { getDatabase } from './database';
-import { getPostBySlug } from './post-library';
+import { generateContentBundle } from './blog-draft';
+import { getBundlePostsForSlug, getPostBySlug, getRelatedPosts } from './post-library';
 import { getErrorMessage, logWorkflow } from './workflow-log';
-
-type GenerationJobStatus = 'queued' | 'running' | 'completed' | 'failed';
-
-type GenerationJobRow = {
-  id: string;
-  status: GenerationJobStatus;
-  request_json: string;
-  draft_slug: string | null;
-  error: string | null;
-  created_at: string;
-  started_at: string | null;
-  completed_at: string | null;
-  updated_at: string;
-};
+import {
+  insertGenerationJobRow,
+  selectGenerationJobRow,
+  updateGenerationJobRow,
+  type GenerationJobRow,
+  type GenerationJobStatus
+} from './repositories/generation-job-repository';
 
 const runningJobs = new Set<string>();
 
-const mapGenerationJob = (row: GenerationJobRow) => ({
-  id: row.id,
-  status: row.status,
-  request: JSON.parse(row.request_json) as DraftRequest,
-  draftSlug: row.draft_slug,
-  error: row.error,
-  createdAt: row.created_at,
-  startedAt: row.started_at,
-  completedAt: row.completed_at,
-  updatedAt: row.updated_at,
-  draft: row.draft_slug ? getPostBySlug(row.draft_slug) : null
-});
+const mapGenerationJob = (row: GenerationJobRow) => {
+  const primaryDraft = row.draftSlug ? getPostBySlug(row.draftSlug) : null;
+  const bundleDrafts = row.draftSlug ? getBundlePostsForSlug(row.draftSlug) : [];
+
+  return {
+    id: row.id,
+    status: row.status,
+    request: JSON.parse(row.requestJson) as DraftRequest,
+    draftSlug: row.draftSlug,
+    error: row.error,
+    createdAt: row.createdAt,
+    startedAt: row.startedAt,
+    completedAt: row.completedAt,
+    updatedAt: row.updatedAt,
+    bundleId: primaryDraft?.bundleId ?? null,
+    primaryDraft,
+    bundleDrafts,
+    draft: primaryDraft,
+    relatedDrafts:
+      row.draftSlug && primaryDraft
+        ? bundleDrafts.filter((draft) => draft.slug !== primaryDraft.slug)
+        : row.draftSlug
+          ? getRelatedPosts(row.draftSlug)
+          : []
+  };
+};
 
 export const getGenerationJob = (id: string) => {
-  const row = getDatabase()
-    .prepare<[string], GenerationJobRow>('SELECT * FROM generation_jobs WHERE id = ?')
-    .get(id);
+  const row = selectGenerationJobRow(id);
 
   return row ? mapGenerationJob(row) : null;
 };
 
 export const createGenerationJob = (request: DraftRequest) => {
   const id = randomUUID();
+  const actionId = `generate_${id.slice(0, 12)}`;
 
-  getDatabase()
-    .prepare<{
-      id: string;
-      requestJson: string;
-    }>(
-      `
-        INSERT INTO generation_jobs (id, status, request_json)
-        VALUES (@id, 'queued', @requestJson)
-      `
-    )
-    .run({
-      id,
-      requestJson: JSON.stringify(request)
-    });
+  insertGenerationJobRow({
+    id,
+    status: 'queued',
+    requestJson: JSON.stringify(request)
+  });
 
   logWorkflow({
     level: 'info',
     message: 'generation.job.queued',
+    context: {
+      actionId,
+      jobId: id
+    },
     details: {
       jobId: id,
       topic: request.topic,
+      outputs: request.outputs,
       desiredLength: request.desiredLength,
       referencePostCount: request.referencePostSlugs?.length ?? 0
     }
   });
 
   queueMicrotask(() => {
-    void runGenerationJob(id);
+    void runGenerationJob(id, actionId);
   });
 
   return getGenerationJob(id);
@@ -86,40 +87,10 @@ const updateGenerationJobStatus = (
     error?: string | null;
   }
 ) => {
-  getDatabase()
-    .prepare<{
-      id: string;
-      status: GenerationJobStatus;
-      draftSlug: string | null;
-      error: string | null;
-    }>(
-      `
-        UPDATE generation_jobs
-        SET
-          status = @status,
-          draft_slug = COALESCE(@draftSlug, draft_slug),
-          error = @error,
-          started_at = CASE
-            WHEN @status = 'running' AND started_at IS NULL THEN datetime('now')
-            ELSE started_at
-          END,
-          completed_at = CASE
-            WHEN @status IN ('completed', 'failed') THEN datetime('now')
-            ELSE completed_at
-          END,
-          updated_at = datetime('now')
-        WHERE id = @id
-      `
-    )
-    .run({
-      id,
-      status: input.status,
-      draftSlug: input.draftSlug ?? null,
-      error: input.error ?? null
-    });
+  updateGenerationJobRow(id, input);
 };
 
-export const runGenerationJob = async (id: string) => {
+export const runGenerationJob = async (id: string, actionId?: string) => {
   if (runningJobs.has(id)) return;
 
   const job = getGenerationJob(id);
@@ -132,32 +103,41 @@ export const runGenerationJob = async (id: string) => {
   logWorkflow({
     level: 'info',
     message: 'generation.job.started',
+    context: {
+      actionId: actionId ?? null,
+      jobId: id
+    },
     details: {
-      jobId: id,
       topic: job.request.topic,
+      outputs: job.request.outputs,
       desiredLength: job.request.desiredLength
     }
   });
 
   try {
-    const draft = await generateBlogDraft(job.request);
+    const bundle = await generateContentBundle(job.request);
 
-    if (!draft) {
+    if (!bundle) {
       throw new Error('Model did not return a valid draft');
     }
 
     updateGenerationJobStatus(id, {
       status: 'completed',
-      draftSlug: draft.slug
+      draftSlug: bundle.primary.slug
     });
 
     logWorkflow({
       level: 'info',
       message: 'generation.job.completed',
-      details: {
+      context: {
+        actionId: actionId ?? null,
         jobId: id,
-        draftSlug: draft.slug,
-        title: draft.title
+        slug: bundle.primary.slug
+      },
+      details: {
+        draftSlug: bundle.primary.slug,
+        title: bundle.primary.title,
+        variantCount: bundle.variants.length
       }
     });
   } catch (cause) {
@@ -171,8 +151,11 @@ export const runGenerationJob = async (id: string) => {
     logWorkflow({
       level: 'error',
       message: 'generation.job.failed',
+      context: {
+        actionId: actionId ?? null,
+        jobId: id
+      },
       details: {
-        jobId: id,
         error
       }
     });

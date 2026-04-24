@@ -1,4 +1,4 @@
-import { getDatabase } from '$lib/server/database';
+import { insertLogEventRow } from './repositories/log-repository';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -7,32 +7,24 @@ export type LogEvent = {
   level: LogLevel;
   message: string;
   timestamp: string;
-  details?: unknown;
+  details?: {
+    context?: Record<string, unknown>;
+    details?: Record<string, unknown>;
+  } | null;
 };
 
 type LogSubscriber = (event: LogEvent) => void;
 
 const subscribers = new Set<LogSubscriber>();
 
-const insertLogEvent = () =>
-  getDatabase().prepare<{
-    level: LogLevel;
-    message: string;
-    details: string | null;
-    timestamp: string;
-  }>(`
-    INSERT INTO log_events (level, message, details, created_at)
-    VALUES (@level, @message, @details, @timestamp)
-  `);
-
 export const publishLog = (event: Omit<LogEvent, 'id' | 'timestamp'>) => {
   const timestamp = new Date().toISOString();
   const details = event.details === undefined ? null : JSON.stringify(event.details);
-  const result = insertLogEvent().run({
+  const result = insertLogEventRow({
     level: event.level,
     message: event.message,
     details,
-    timestamp
+    createdAt: timestamp
   });
 
   const logEvent: LogEvent = {

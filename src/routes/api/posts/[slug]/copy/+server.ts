@@ -1,10 +1,10 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { BlogSlugSchema } from '../../../../../openai/model';
-import { publishApprovedDraft } from '$lib/server/post-library';
+import { createEditableCopy } from '$lib/server/post-library';
 import { getErrorMessage, logWorkflow } from '$lib/server/workflow-log';
 
-export const POST: RequestHandler = async ({ params }) => {
+export const POST: RequestHandler = ({ params }) => {
   const parsedSlug = BlogSlugSchema.safeParse(params.slug);
 
   if (!parsedSlug.success) {
@@ -12,7 +12,7 @@ export const POST: RequestHandler = async ({ params }) => {
   }
 
   try {
-    const post = await publishApprovedDraft(parsedSlug.data);
+    const post = createEditableCopy(parsedSlug.data);
 
     if (!post) {
       return json({ error: 'Post not found' }, { status: 404 });
@@ -22,7 +22,7 @@ export const POST: RequestHandler = async ({ params }) => {
   } catch (cause) {
     logWorkflow({
       level: 'error',
-      message: 'post.publish.failed',
+      message: 'post.copy.failed',
       details: {
         slug: parsedSlug.data,
         error: getErrorMessage(cause)
@@ -31,7 +31,7 @@ export const POST: RequestHandler = async ({ params }) => {
 
     return json(
       {
-        error: cause instanceof Error ? cause.message : 'Failed to publish post'
+        error: cause instanceof Error ? cause.message : 'Failed to create copy'
       },
       { status: 400 }
     );

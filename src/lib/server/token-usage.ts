@@ -1,5 +1,10 @@
-import { getDatabase } from './database';
 import { logWorkflow } from './workflow-log';
+import {
+  insertTokenUsageEvent,
+  selectRecentTokenUsageEvents,
+  selectTokenUsageDailySummary,
+  selectTokenUsageSessionSummary
+} from './repositories/token-usage-repository';
 
 type TokenUsage = {
   inputTokens: number;
@@ -9,7 +14,13 @@ type TokenUsage = {
 };
 
 type RecordTokenUsageInput = {
+  actionId?: string | null;
+  requestId?: string | null;
   sessionId: string;
+  jobId?: string | null;
+  bundleId?: number | null;
+  slug?: string | null;
+  target?: string | null;
   operation: string;
   stage: string;
   model: string;
@@ -35,20 +46,6 @@ type TokenUsageSessionRow = {
   output_tokens: number;
   total_tokens: number;
   request_count: number;
-};
-
-type TokenUsageEventRow = {
-  id: number;
-  session_id: string;
-  operation: string;
-  stage: string;
-  model: string;
-  response_id: string | null;
-  input_tokens: number;
-  output_tokens: number;
-  total_tokens: number;
-  details_json: string;
-  created_at: string;
 };
 
 const getNumberField = (value: Record<string, unknown>, key: string) => {
@@ -82,11 +79,19 @@ export const recordTokenUsage = (input: RecordTokenUsageInput) => {
     logWorkflow({
       level: 'debug',
       message: 'tokens.usage.missing',
-      details: {
+      context: {
+        actionId: input.actionId ?? null,
+        requestId: input.requestId ?? null,
         sessionId: input.sessionId,
+        jobId: input.jobId ?? null,
+        bundleId: input.bundleId ?? null,
+        slug: input.slug ?? null,
+        target: input.target ?? null,
+        model: input.model
+      },
+      details: {
         operation: input.operation,
         stage: input.stage,
-        model: input.model,
         responseId: input.responseId ?? null
       }
     });
@@ -94,63 +99,34 @@ export const recordTokenUsage = (input: RecordTokenUsageInput) => {
     return null;
   }
 
-  getDatabase()
-    .prepare<{
-      sessionId: string;
-      operation: string;
-      stage: string;
-      model: string;
-      responseId: string | null;
-      inputTokens: number;
-      outputTokens: number;
-      totalTokens: number;
-      detailsJson: string;
-    }>(
-      `
-        INSERT INTO token_usage_events (
-          session_id,
-          operation,
-          stage,
-          model,
-          response_id,
-          input_tokens,
-          output_tokens,
-          total_tokens,
-          details_json
-        )
-        VALUES (
-          @sessionId,
-          @operation,
-          @stage,
-          @model,
-          @responseId,
-          @inputTokens,
-          @outputTokens,
-          @totalTokens,
-          @detailsJson
-        )
-      `
-    )
-    .run({
-      sessionId: input.sessionId,
-      operation: input.operation,
-      stage: input.stage,
-      model: input.model,
-      responseId: input.responseId ?? null,
-      inputTokens: normalizedUsage.inputTokens,
-      outputTokens: normalizedUsage.outputTokens,
-      totalTokens: normalizedUsage.totalTokens,
-      detailsJson: JSON.stringify(normalizedUsage.details)
-    });
+  insertTokenUsageEvent({
+    sessionId: input.sessionId,
+    operation: input.operation,
+    stage: input.stage,
+    model: input.model,
+    responseId: input.responseId ?? null,
+    inputTokens: normalizedUsage.inputTokens,
+    outputTokens: normalizedUsage.outputTokens,
+    totalTokens: normalizedUsage.totalTokens,
+    detailsJson: JSON.stringify(normalizedUsage.details)
+  });
 
   logWorkflow({
     level: 'info',
     message: 'tokens.usage.recorded',
-    details: {
+    context: {
+      actionId: input.actionId ?? null,
+      requestId: input.requestId ?? null,
       sessionId: input.sessionId,
+      jobId: input.jobId ?? null,
+      bundleId: input.bundleId ?? null,
+      slug: input.slug ?? null,
+      target: input.target ?? null,
+      model: input.model
+    },
+    details: {
       operation: input.operation,
       stage: input.stage,
-      model: input.model,
       responseId: input.responseId ?? null,
       inputTokens: normalizedUsage.inputTokens,
       outputTokens: normalizedUsage.outputTokens,
@@ -162,70 +138,27 @@ export const recordTokenUsage = (input: RecordTokenUsageInput) => {
 };
 
 export const getTokenUsageDailySummary = (days = 30) => {
-  return getDatabase()
-    .prepare<[number], TokenUsageSummaryRow>(
-      `
-        SELECT
-          date(created_at) AS date,
-          model,
-          SUM(input_tokens) AS input_tokens,
-          SUM(output_tokens) AS output_tokens,
-          SUM(total_tokens) AS total_tokens,
-          COUNT(*) AS request_count
-        FROM token_usage_events
-        WHERE created_at >= datetime('now', '-' || ? || ' days')
-        GROUP BY date(created_at), model
-        ORDER BY date(created_at) ASC, model ASC
-      `
-    )
-    .all(days);
+  return selectTokenUsageDailySummary(days) satisfies TokenUsageSummaryRow[];
 };
 
 export const getTokenUsageSessionSummary = (days = 30) => {
-  return getDatabase()
-    .prepare<[number], TokenUsageSessionRow>(
-      `
-        SELECT
-          session_id,
-          model,
-          MIN(created_at) AS first_seen,
-          MAX(created_at) AS last_seen,
-          SUM(input_tokens) AS input_tokens,
-          SUM(output_tokens) AS output_tokens,
-          SUM(total_tokens) AS total_tokens,
-          COUNT(*) AS request_count
-        FROM token_usage_events
-        WHERE created_at >= datetime('now', '-' || ? || ' days')
-        GROUP BY session_id, model
-        ORDER BY last_seen DESC
-      `
-    )
-    .all(days);
+  return selectTokenUsageSessionSummary(days) satisfies TokenUsageSessionRow[];
 };
 
 export const getRecentTokenUsageEvents = (limit = 25) => {
-  const rows = getDatabase()
-    .prepare<[number], TokenUsageEventRow>(
-      `
-        SELECT *
-        FROM token_usage_events
-        ORDER BY created_at DESC
-        LIMIT ?
-      `
-    )
-    .all(limit);
+  const rows = selectRecentTokenUsageEvents(limit);
 
   return rows.map((row) => ({
     id: row.id,
-    sessionId: row.session_id,
+    sessionId: row.sessionId,
     operation: row.operation,
     stage: row.stage,
     model: row.model,
-    responseId: row.response_id,
-    inputTokens: row.input_tokens,
-    outputTokens: row.output_tokens,
-    totalTokens: row.total_tokens,
-    details: JSON.parse(row.details_json) as Record<string, unknown>,
-    createdAt: row.created_at
+    responseId: row.responseId,
+    inputTokens: row.inputTokens,
+    outputTokens: row.outputTokens,
+    totalTokens: row.totalTokens,
+    details: JSON.parse(row.detailsJson) as Record<string, unknown>,
+    createdAt: row.createdAt
   }));
 };

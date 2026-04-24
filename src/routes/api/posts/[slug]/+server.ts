@@ -2,7 +2,12 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { z } from 'zod/v4';
 import { BlogSlugSchema } from '../../../../openai/model';
-import { getPostBySlug, updatePostContent } from '$lib/server/post-library';
+import {
+  getPostBundleBySlug,
+  getPostBySlug,
+  getRelatedPosts,
+  updatePostContent
+} from '$lib/server/post-library';
 import { getErrorMessage, logWorkflow } from '$lib/server/workflow-log';
 
 const UpdatePostSchema = z.object({
@@ -25,7 +30,11 @@ export const GET: RequestHandler = ({ params }) => {
     return json({ error: 'Post not found' }, { status: 404 });
   }
 
-  return json({ post });
+  return json({
+    post,
+    relatedPosts: getRelatedPosts(parsedSlug.data),
+    bundle: getPostBundleBySlug(parsedSlug.data)
+  });
 };
 
 export const PUT: RequestHandler = async ({ params, request }) => {

@@ -1,7 +1,10 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getIntegrationStatus } from '$lib/server/clients';
+import { getIntegrationStatus, getReadiness } from '$lib/server/app-settings';
 
 export const GET: RequestHandler = () => {
-  return json(getIntegrationStatus());
+  return json({
+    integrations: getIntegrationStatus(),
+    readiness: getReadiness()
+  });
 };

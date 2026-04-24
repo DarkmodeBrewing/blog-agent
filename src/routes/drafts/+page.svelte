@@ -1,18 +1,34 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
+  import { page } from '$app/state';
   import { apiUrl, requestJson } from '$lib/client/request-json';
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
 
   type PostStatus = 'synced' | 'draft' | 'approved' | 'committed' | 'rejected';
   type DesiredLength = 'short' | 'medium' | 'long';
+  type GenerationOutput = 'blog' | 'x' | 'linkedin';
 
   type PostRecord = {
     id: number;
+    bundleId: number | null;
     slug: string;
     title: string;
     ingress: string | null;
     body: string;
     tags: string[];
     status: PostStatus;
+    contentType: 'blog' | 'x' | 'linkedin' | 'instagram' | 'generic';
+    variantRole: 'primary' | 'derived' | 'standalone';
+    lockedAt: string | null;
+    publicationSummary: {
+      total: number;
+      publishedTargets: string[];
+      failedTargets: string[];
+      latestPublishedAt: string | null;
+      latestTarget: string | null;
+    };
+    isPublished: boolean;
+    isEditable: boolean;
   };
 
   type GenerationJob = {
@@ -20,7 +36,11 @@
     status: 'queued' | 'running' | 'completed' | 'failed';
     draftSlug: string | null;
     error: string | null;
+    bundleId: number | null;
+    primaryDraft: PostRecord | null;
+    bundleDrafts: PostRecord[];
     draft: PostRecord | null;
+    relatedDrafts: PostRecord[];
   };
 
   type GenerateResponse = {
@@ -38,13 +58,86 @@
     timestamp: string;
   };
 
+  type ReadinessIssue = {
+    id: string;
+    severity: 'error' | 'warning';
+    title: string;
+    message: string;
+    href: string;
+  };
+
+  type AppReadiness = {
+    status: 'ready' | 'ready_with_warnings' | 'incomplete';
+    hasBlockingIssues: boolean;
+    readyForGeneration: boolean;
+    issues: ReadinessIssue[];
+  };
+
+  type PublishTarget =
+    | 'markdown_download'
+    | 'markdown_disk_export'
+    | 'github_repo'
+    | 'cms_contentful'
+    | 'social_x'
+    | 'social_linkedin';
+
+  type PublishTargetOption = {
+    id: PublishTarget;
+    label: string;
+    description: string;
+    implemented: boolean;
+    requiresConfiguration: boolean;
+    kind: 'markdown' | 'repository' | 'cms' | 'social';
+    enabled: boolean;
+  };
+
+  type FrontmatterPreferences = {
+    title: boolean;
+    slug: boolean;
+    ingress: boolean;
+    tags: boolean;
+    category: boolean;
+    date: boolean;
+    draft: boolean;
+  };
+
+  type PublishResult = {
+    target: PublishTarget;
+    post: PostRecord;
+    artifact?: {
+      filename: string;
+      content: string;
+      contentType: string;
+    };
+    filePath?: string;
+    remoteUrl?: string;
+    commitSha?: string;
+  };
+
+  type PostDetailResponse = {
+    post: PostRecord;
+    relatedPosts: PostRecord[];
+    bundle: {
+      key: string;
+      bundleId: number | null;
+      primaryPost: PostRecord;
+      posts: PostRecord[];
+    } | null;
+  };
+
   let posts = $state<PostRecord[]>([]);
   let logs = $state<LogEvent[]>([]);
+  let appReadiness = $state<AppReadiness | null>(null);
+  let publishTargets = $state<PublishTargetOption[]>([]);
+  let editorBundlePosts = $state<PostRecord[]>([]);
+  let editorRelatedPosts = $state<PostRecord[]>([]);
+  let requestedPublishTargets = $state<PublishTarget[]>(['markdown_download']);
   let loadingPosts = $state(false);
   let generating = $state(false);
   let generationJobId = $state<string | null>(null);
   let generationJobStatus = $state<GenerationJob['status'] | null>(null);
   let saving = $state(false);
+  let publishing = $state(false);
   let statusMessage = $state('');
   let errorMessage = $state('');
 
@@ -54,21 +147,38 @@
   let category = $state('');
   let requestedTags = $state('');
   let desiredLength = $state<DesiredLength>('medium');
+  let requestedOutputs = $state<GenerationOutput[]>(['blog']);
   let referencePostSlugs = $state<string[]>([]);
+  let frontmatterPreferences = $state<FrontmatterPreferences>({
+    title: true,
+    slug: true,
+    ingress: true,
+    tags: true,
+    category: false,
+    date: false,
+    draft: false
+  });
 
   let editorSlug = $state('');
   let editorTitle = $state('');
   let editorIngress = $state('');
   let editorTags = $state('');
   let editorBody = $state('');
+  let editorMode = $state<'preview' | 'edit'>('preview');
+  let selectedPublishTarget = $state<PublishTarget>('markdown_download');
 
   let referencePosts = $derived(
     posts.filter((post) => referencePostSlugs.includes(post.slug)).map((post) => post.title)
   );
+  let editorPost = $derived(posts.find((post) => post.slug === editorSlug) ?? null);
   let hasDraft = $derived(Boolean(editorSlug));
-  let controlsDisabled = $derived(generating || saving);
+  let editorLocked = $derived(Boolean(editorPost && !editorPost.isEditable));
+  let generationBlocked = $derived(appReadiness ? !appReadiness.readyForGeneration : false);
+  let controlsDisabled = $derived(generating || saving || publishing || generationBlocked);
 
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
+  let previewRegion = $state<HTMLDivElement | null>(null);
+  let bodyEditor = $state<HTMLTextAreaElement | null>(null);
 
   const splitCsv = (value: string) =>
     value
@@ -90,10 +200,113 @@
     }
   };
 
+  const loadReadiness = async () => {
+    try {
+      const data = await requestJson<{ readiness: AppReadiness }>(
+        apiUrl('/api/settings/readiness')
+      );
+      appReadiness = data.readiness;
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Failed to load application status';
+    }
+  };
+
+  const loadPublishTargets = async () => {
+    try {
+      const data = await requestJson<{ targets: PublishTargetOption[] }>(
+        apiUrl('/api/publish-targets')
+      );
+      publishTargets = data.targets;
+
+      if (!publishTargets.some((target) => target.id === selectedPublishTarget && target.enabled)) {
+        selectedPublishTarget = (publishTargets.find((target) => target.enabled)?.id ??
+          'markdown_download') as PublishTarget;
+      }
+
+      requestedPublishTargets = publishTargets
+        .filter((target) => target.enabled && target.implemented)
+        .map((target) => target.id);
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Failed to load publish targets';
+    }
+  };
+
+  const loadAppSettings = async () => {
+    try {
+      const data = await requestJson<{
+        settings: {
+          frontmatter: FrontmatterPreferences & {
+            defaults: {
+              category: string;
+              date: string;
+              draft: boolean;
+            };
+            order: Array<'title' | 'slug' | 'ingress' | 'tags' | 'category' | 'date' | 'draft'>;
+          };
+        };
+      }>(apiUrl('/api/settings/app'));
+
+      frontmatterPreferences = {
+        title: data.settings.frontmatter.title,
+        slug: data.settings.frontmatter.slug,
+        ingress: data.settings.frontmatter.ingress,
+        tags: data.settings.frontmatter.tags,
+        category: data.settings.frontmatter.category,
+        date: data.settings.frontmatter.date,
+        draft: data.settings.frontmatter.draft
+      };
+    } catch {
+      // Keep the local defaults when settings cannot be loaded yet.
+    }
+  };
+
+  const loadEditorRelations = async () => {
+    if (!editorSlug) {
+      editorBundlePosts = [];
+      editorRelatedPosts = [];
+      return;
+    }
+
+    try {
+      const data = await requestJson<PostDetailResponse>(
+        apiUrl(`/api/posts/${encodeURIComponent(editorSlug)}`)
+      );
+      editorBundlePosts = data.bundle?.posts ?? [data.post];
+      editorRelatedPosts =
+        data.bundle?.posts.filter((post) => post.slug !== data.post.slug) ?? data.relatedPosts;
+    } catch {
+      editorBundlePosts = [];
+      editorRelatedPosts = [];
+    }
+  };
+
   const toggleReferencePost = (slug: string) => {
     referencePostSlugs = referencePostSlugs.includes(slug)
       ? referencePostSlugs.filter((referenceSlug) => referenceSlug !== slug)
       : [...referencePostSlugs, slug];
+  };
+
+  const toggleOutput = (output: GenerationOutput) => {
+    if (output === 'blog') {
+      requestedOutputs = requestedOutputs.includes('blog')
+        ? ['blog']
+        : ['blog', ...requestedOutputs.filter((item) => item !== 'blog')];
+      return;
+    }
+
+    requestedOutputs = requestedOutputs.includes(output)
+      ? requestedOutputs.filter((item) => item !== output)
+      : [...requestedOutputs, output];
+
+    if (!requestedOutputs.includes('blog')) {
+      requestedOutputs = ['blog', ...requestedOutputs];
+    }
+  };
+
+  const toggleRequestedPublishTarget = (target: PublishTarget) => {
+    requestedPublishTargets = requestedPublishTargets.includes(target)
+      ? requestedPublishTargets.filter((item) => item !== target)
+      : [...requestedPublishTargets, target];
   };
 
   const loadDraftIntoEditor = (post: PostRecord) => {
@@ -102,6 +315,38 @@
     editorIngress = post.ingress ?? '';
     editorTags = post.tags.join(', ');
     editorBody = post.body;
+    editorMode = 'preview';
+  };
+
+  const setEditorMode = async (mode: 'preview' | 'edit') => {
+    editorMode = mode;
+    await tick();
+
+    if (mode === 'preview') {
+      previewRegion?.focus();
+      return;
+    }
+
+    bodyEditor?.focus();
+  };
+
+  const applyRouteIntent = async (availablePosts: PostRecord[]) => {
+    const slug = page.url.searchParams.get('slug');
+    const copy = page.url.searchParams.get('copy');
+
+    if (copy) {
+      await createCopy(copy);
+      return;
+    }
+
+    if (!slug) {
+      return;
+    }
+
+    const matchingPost = availablePosts.find((post) => post.slug === slug);
+    if (matchingPost) {
+      loadDraftIntoEditor(matchingPost);
+    }
   };
 
   const clearGenerationPoll = () => {
@@ -118,10 +363,13 @@
       );
       generationJobStatus = data.job.status;
 
-      if (data.job.status === 'completed' && data.job.draft) {
+      if (data.job.status === 'completed' && data.job.primaryDraft) {
         clearGenerationPoll();
-        loadDraftIntoEditor(data.job.draft);
-        statusMessage = `Generated ${data.job.draft.slug}`;
+        loadDraftIntoEditor(data.job.primaryDraft);
+        statusMessage =
+          data.job.bundleDrafts.length > 1
+            ? `Generated ${data.job.bundleDrafts.length} drafts`
+            : `Generated ${data.job.primaryDraft.slug}`;
         generationJobId = null;
         generationJobStatus = null;
         generating = false;
@@ -151,6 +399,11 @@
   };
 
   const generateDraft = async () => {
+    if (generationBlocked) {
+      errorMessage = 'Complete the required application setup before generating content';
+      return;
+    }
+
     generating = true;
     generationJobId = null;
     generationJobStatus = 'queued';
@@ -166,6 +419,11 @@
         category: category || undefined,
         tags: splitCsv(requestedTags),
         desiredLength,
+        outputs: requestedOutputs,
+        publishTargets: requestedPublishTargets,
+        blogPreferences: {
+          frontmatter: frontmatterPreferences
+        },
         referencePostSlugs
       };
       const data = await requestJson<GenerateResponse>(
@@ -189,6 +447,10 @@
 
   const saveDraft = async () => {
     if (!editorSlug) return;
+    if (editorLocked) {
+      errorMessage = 'Published posts are locked. Create a copy to continue editing.';
+      return;
+    }
 
     saving = true;
     statusMessage = '';
@@ -216,6 +478,10 @@
 
   const updateStatus = async (status: PostStatus) => {
     if (!editorSlug) return;
+    if (editorLocked) {
+      errorMessage = 'Published posts are locked. Create a copy to continue editing.';
+      return;
+    }
 
     await saveDraft();
 
@@ -236,20 +502,131 @@
     if (!editorSlug) return;
 
     await saveDraft();
+    publishing = true;
+    statusMessage = '';
+    errorMessage = '';
 
     try {
-      await requestJson(apiUrl(`/api/posts/${encodeURIComponent(editorSlug)}/publish`), {
-        method: 'POST'
-      });
-      statusMessage = `${editorSlug} published`;
+      const data = await requestJson<{ result: PublishResult }>(
+        apiUrl(
+          `/api/posts/${encodeURIComponent(editorSlug)}/publish/${encodeURIComponent(selectedPublishTarget)}`
+        ),
+        {
+          method: 'POST'
+        }
+      );
+
+      if (data.result.artifact && selectedPublishTarget === 'markdown_download') {
+        const blob = new Blob([data.result.artifact.content], {
+          type: data.result.artifact.contentType
+        });
+        const downloadUrl = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = downloadUrl;
+        anchor.download = data.result.artifact.filename;
+        document.body.append(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(downloadUrl);
+      }
+
+      statusMessage =
+        selectedPublishTarget === 'markdown_disk_export' && data.result.filePath
+          ? `${editorSlug} exported to ${data.result.filePath}`
+          : selectedPublishTarget === 'github_repo' && data.result.remoteUrl
+            ? `${editorSlug} published to GitHub`
+            : `${editorSlug} published via ${selectedPublishTarget}`;
       await loadPosts();
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : 'Publish failed';
+    } finally {
+      publishing = false;
+    }
+  };
+
+  const copyMarkdownToClipboard = async () => {
+    if (!editorSlug) return;
+
+    try {
+      const data = await requestJson<{
+        artifact: {
+          filename: string;
+          content: string;
+          contentType: string;
+        };
+      }>(apiUrl(`/api/posts/${encodeURIComponent(editorSlug)}/markdown`));
+
+      if (!data.artifact) {
+        throw new Error('No Markdown artifact returned');
+      }
+
+      await navigator.clipboard.writeText(data.artifact.content);
+      statusMessage = `${editorSlug} copied to clipboard`;
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Copy failed';
+    }
+  };
+
+  const downloadMarkdown = async () => {
+    if (!editorSlug) return;
+
+    try {
+      const data = await requestJson<{
+        artifact: {
+          filename: string;
+          content: string;
+          contentType: string;
+        };
+      }>(apiUrl(`/api/posts/${encodeURIComponent(editorSlug)}/markdown`));
+
+      if (!data.artifact) {
+        throw new Error('No Markdown artifact returned');
+      }
+
+      const blob = new Blob([data.artifact.content], {
+        type: data.artifact.contentType
+      });
+      const downloadUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = downloadUrl;
+      anchor.download = data.artifact.filename;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(downloadUrl);
+      statusMessage = `${editorSlug} download prepared`;
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Download failed';
+    }
+  };
+
+  const createCopy = async (slug = editorSlug) => {
+    if (!slug) return;
+
+    try {
+      const data = await requestJson<{ post: PostRecord }>(
+        apiUrl(`/api/posts/${encodeURIComponent(slug)}/copy`),
+        {
+          method: 'POST'
+        }
+      );
+
+      statusMessage = `${slug} copied to ${data.post.slug}`;
+      await loadPosts();
+      loadDraftIntoEditor(data.post);
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Copy failed';
     }
   };
 
   onMount(() => {
-    void loadPosts();
+    void (async () => {
+      await loadPosts();
+      await applyRouteIntent(posts);
+    })();
+    void loadReadiness();
+    void loadPublishTargets();
+    void loadAppSettings();
 
     const events = new EventSource(apiUrl('/api/logs'));
 
@@ -267,6 +644,10 @@
     clearGenerationPoll();
     logs = [];
   });
+
+  $effect(() => {
+    void loadEditorRelations();
+  });
 </script>
 
 <svelte:head>
@@ -276,6 +657,7 @@
 <div class="space-y-4">
   {#if statusMessage}
     <p
+      aria-live="polite"
       class="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800"
     >
       {statusMessage}
@@ -283,9 +665,22 @@
   {/if}
 
   {#if errorMessage}
-    <p class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+    <p
+      aria-live="assertive"
+      class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+    >
       {errorMessage}
     </p>
+  {/if}
+
+  {#if appReadiness && !appReadiness.readyForGeneration}
+    <div class="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+      <p class="font-medium">Generation is unavailable until setup is complete.</p>
+      <p class="mt-1">
+        {appReadiness.issues[0]?.message}
+        <a class="underline" href={resolve('/settings')}>Open settings</a>.
+      </p>
+    </div>
   {/if}
 
   {#if generating}
@@ -303,8 +698,8 @@
     </div>
   {/if}
 
-  <section class="grid grid-rows-2 gap-2">
-    <section class="grid grid-cols-2 gap-2">
+  <section class="grid gap-4 xl:grid-cols-[24rem_minmax(0,1fr)]">
+    <div class="space-y-4">
       <form
         class="space-y-4 rounded-md border border-slate-200 bg-white p-4"
         onsubmit={(event) => {
@@ -313,13 +708,18 @@
         }}
       >
         <div class="flex items-center justify-between gap-3">
-          <h1 class="text-lg font-semibold text-slate-950">Generate</h1>
+          <div>
+            <h1 class="text-lg font-semibold text-slate-950">Generate</h1>
+            <p class="text-sm text-slate-500">
+              Create a primary blog draft and optional social variants.
+            </p>
+          </div>
           <button
             class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-            disabled={generating}
+            disabled={controlsDisabled}
             type="submit"
           >
-            {generating ? 'Generating...' : 'Generate'}
+            {generating ? 'Generating...' : generationBlocked ? 'Setup required' : 'Generate'}
           </button>
         </div>
 
@@ -328,7 +728,7 @@
           <input
             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={topic}
-            disabled={generating}
+            disabled={controlsDisabled}
             minlength="10"
             required
           />
@@ -339,7 +739,7 @@
           <textarea
             class="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={summary}
-            disabled={generating}
+            disabled={controlsDisabled}
           ></textarea>
         </label>
 
@@ -349,7 +749,7 @@
             <select
               class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
               bind:value={desiredLength}
-              disabled={generating}
+              disabled={controlsDisabled}
             >
               <option value="short">Short</option>
               <option value="medium">Medium</option>
@@ -362,7 +762,7 @@
             <input
               class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
               bind:value={category}
-              disabled={generating}
+              disabled={controlsDisabled}
             />
           </label>
         </div>
@@ -372,7 +772,7 @@
           <input
             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={keywords}
-            disabled={generating}
+            disabled={controlsDisabled}
           />
         </label>
 
@@ -381,106 +781,244 @@
           <input
             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
             bind:value={requestedTags}
-            disabled={generating}
+            disabled={controlsDisabled}
           />
         </label>
+
+        <fieldset class="space-y-2">
+          <legend class="text-sm font-medium text-slate-700">Outputs</legend>
+          <label class="flex gap-2 text-sm">
+            <input checked={requestedOutputs.includes('blog')} disabled type="checkbox" />
+            <span>
+              <span class="block font-medium text-slate-900">Blog</span>
+              <span class="text-xs text-slate-500">Primary draft, always generated first.</span>
+            </span>
+          </label>
+          <label class="flex gap-2 text-sm">
+            <input
+              checked={requestedOutputs.includes('x')}
+              disabled={controlsDisabled}
+              onchange={() => toggleOutput('x')}
+              type="checkbox"
+            />
+            <span>
+              <span class="block font-medium text-slate-900">X</span>
+              <span class="text-xs text-slate-500"
+                >Derived from the generated blog post, single-post sized.</span
+              >
+            </span>
+          </label>
+          <label class="flex gap-2 text-sm">
+            <input
+              checked={requestedOutputs.includes('linkedin')}
+              disabled={controlsDisabled}
+              onchange={() => toggleOutput('linkedin')}
+              type="checkbox"
+            />
+            <span>
+              <span class="block font-medium text-slate-900">LinkedIn</span>
+              <span class="text-xs text-slate-500"
+                >Derived from the generated blog post, shorter than the blog draft.</span
+              >
+            </span>
+          </label>
+        </fieldset>
+
+        <fieldset class="space-y-2">
+          <legend class="text-sm font-medium text-slate-700">Planned publish targets</legend>
+          {#each publishTargets.filter((target) => target.implemented) as target (target.id)}
+            <label class="flex gap-2 text-sm">
+              <input
+                checked={requestedPublishTargets.includes(target.id)}
+                disabled={controlsDisabled || !target.enabled}
+                onchange={() => toggleRequestedPublishTarget(target.id)}
+                type="checkbox"
+              />
+              <span>
+                <span class="block font-medium text-slate-900">{target.label}</span>
+                <span class="text-xs text-slate-500">{target.description}</span>
+              </span>
+            </label>
+          {/each}
+        </fieldset>
+
+        <fieldset class="space-y-2">
+          <legend class="text-sm font-medium text-slate-700">Blog frontmatter preferences</legend>
+          <div class="grid gap-2 sm:grid-cols-2">
+            {#each Object.entries(frontmatterPreferences) as [key, enabled] (key)}
+              <label class="flex gap-2 text-sm">
+                <input
+                  checked={enabled}
+                  disabled={controlsDisabled}
+                  onchange={() =>
+                    (frontmatterPreferences = {
+                      ...frontmatterPreferences,
+                      [key]: !enabled
+                    })}
+                  type="checkbox"
+                />
+                <span class="capitalize">{key}</span>
+              </label>
+            {/each}
+          </div>
+        </fieldset>
 
         <p class="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">
           {referencePosts.length > 0 ? referencePosts.join(', ') : 'No reference posts selected.'}
         </p>
       </form>
 
-      <div class="grid grid-rows-2 gap-2">
-        <aside class="w-full rounded-md border border-slate-200 bg-white p-4">
-          <h2 class="text-base font-semibold text-slate-950">Logs</h2>
-          <div class="mt-3 max-h-64 space-y-2 overflow-auto text-sm">
-            {#if logs.length === 0}
-              <p class="text-slate-500">No log events yet.</p>
-            {:else}
-              {#each logs as log (log.id)}
-                <div class="rounded-md bg-slate-50 p-2">
-                  <div class="flex justify-between gap-3 text-xs text-slate-500">
-                    <span class="font-medium uppercase">{log.level}</span>
-                    <time>{new Date(log.timestamp).toLocaleTimeString()}</time>
-                  </div>
-                  <p class="mt-1 text-slate-800">{log.message}</p>
-                </div>
-              {/each}
-            {/if}
+      <aside class="rounded-md border border-slate-200 bg-white">
+        <div class="border-b border-slate-200 p-4">
+          <div class="flex items-center justify-between gap-3">
+            <h2 class="text-base font-semibold text-slate-950">Reference posts</h2>
+            <button
+              class="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700"
+              disabled={controlsDisabled}
+              type="button"
+              onclick={() => void loadPosts()}
+            >
+              Refresh
+            </button>
           </div>
-        </aside>
+        </div>
 
-        <aside class="w-full rounded-md border border-slate-200 bg-white">
-          <div class="border-b border-slate-200 p-4">
-            <div class="flex items-center justify-between gap-3">
-              <h2 class="text-base font-semibold text-slate-950">References</h2>
-              <button
-                class="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700"
-                disabled={generating}
-                type="button"
-                onclick={() => void loadPosts()}
-              >
-                Refresh
-              </button>
-            </div>
-          </div>
-
-          <div class="max-h-184 overflow-auto">
-            {#if loadingPosts}
-              <p class="p-4 text-sm text-slate-500">Loading posts...</p>
-            {:else if posts.length === 0}
-              <p class="p-4 text-sm text-slate-500">No posts available.</p>
-            {:else}
-              {#each posts as post (post.id)}
-                <div class="border-b border-slate-100 p-3">
-                  <label class="flex gap-2 text-sm">
-                    <input
-                      checked={referencePostSlugs.includes(post.slug)}
-                      disabled={generating}
-                      onchange={() => toggleReferencePost(post.slug)}
-                      type="checkbox"
-                    />
-                    <span>
-                      <span class="block font-medium text-slate-900">{post.title}</span>
-                      <span class="text-xs text-slate-500">{post.status} · {post.slug}</span>
-                    </span>
-                  </label>
-                  {#if post.status === 'draft' || post.status === 'approved'}
+        <div class="max-h-[28rem] overflow-auto">
+          {#if loadingPosts}
+            <p class="p-4 text-sm text-slate-500">Loading posts...</p>
+          {:else if posts.length === 0}
+            <p class="p-4 text-sm text-slate-500">No posts available.</p>
+          {:else}
+            {#each posts as post (post.id)}
+              <div class="border-b border-slate-100 p-3">
+                <label class="flex gap-2 text-sm">
+                  <input
+                    checked={referencePostSlugs.includes(post.slug)}
+                    disabled={controlsDisabled}
+                    onchange={() => toggleReferencePost(post.slug)}
+                    type="checkbox"
+                  />
+                  <span class="min-w-0">
+                    <span class="block truncate font-medium text-slate-900">{post.title}</span>
+                    <span class="text-xs text-slate-500">{post.contentType} · {post.slug}</span>
+                  </span>
+                </label>
+                <div class="mt-2 flex flex-wrap gap-2">
+                  {#if post.isEditable}
                     <button
-                      class="mt-2 rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700"
-                      disabled={generating}
+                      class="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700"
+                      disabled={controlsDisabled}
                       type="button"
                       onclick={() => loadDraftIntoEditor(post)}
                     >
-                      Edit
+                      Open draft
+                    </button>
+                  {:else if post.isPublished}
+                    <button
+                      class="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700"
+                      disabled={controlsDisabled}
+                      type="button"
+                      onclick={() => void createCopy(post.slug)}
+                    >
+                      Create copy
                     </button>
                   {/if}
                 </div>
-              {/each}
-            {/if}
-          </div>
-        </aside>
-      </div>
-    </section>
+              </div>
+            {/each}
+          {/if}
+        </div>
+      </aside>
+
+      <aside class="rounded-md border border-slate-200 bg-white p-4">
+        <h2 class="text-base font-semibold text-slate-950">Recent logs</h2>
+        <div class="mt-3 max-h-72 space-y-2 overflow-auto text-sm">
+          {#if logs.length === 0}
+            <p class="text-slate-500">No log events yet.</p>
+          {:else}
+            {#each logs as log (log.id)}
+              <div class="rounded-md bg-slate-50 p-2">
+                <div class="flex justify-between gap-3 text-xs text-slate-500">
+                  <span class="font-medium uppercase">{log.level}</span>
+                  <time>{new Date(log.timestamp).toLocaleTimeString()}</time>
+                </div>
+                <p class="mt-1 text-slate-800">{log.message}</p>
+              </div>
+            {/each}
+          {/if}
+        </div>
+      </aside>
+    </div>
 
     <section class="rounded-md border border-slate-200 bg-white">
-      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4">
-        <div>
-          <h2 class="text-lg font-semibold text-slate-950">Editor</h2>
-          <p class="text-sm text-slate-500">{editorSlug || 'Generate or select a draft.'}</p>
+      <div class="border-b border-slate-200 p-4">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-semibold text-slate-950">Editor workspace</h2>
+            <p class="text-sm text-slate-500">
+              {editorSlug || 'Generate a draft or open one from the reference list.'}
+            </p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="inline-flex rounded-md border border-slate-300 p-1">
+              <button
+                aria-pressed={editorMode === 'preview'}
+                aria-controls="draft-preview-panel"
+                class={`rounded px-3 py-1.5 text-sm font-medium ${
+                  editorMode === 'preview' ? 'bg-slate-950 text-white' : 'text-slate-700'
+                }`}
+                disabled={!hasDraft}
+                type="button"
+                onclick={() => void setEditorMode('preview')}
+              >
+                Preview
+              </button>
+              <button
+                aria-pressed={editorMode === 'edit'}
+                aria-controls="draft-edit-panel"
+                class={`rounded px-3 py-1.5 text-sm font-medium ${
+                  editorMode === 'edit' ? 'bg-slate-950 text-white' : 'text-slate-700'
+                }`}
+                disabled={!hasDraft || editorLocked}
+                type="button"
+                onclick={() => void setEditorMode('edit')}
+              >
+                Edit
+              </button>
+            </div>
+
+            <label class="min-w-52">
+              <span class="sr-only">Publish target</span>
+              <select
+                bind:value={selectedPublishTarget}
+                class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+                disabled={!hasDraft || controlsDisabled}
+              >
+                {#each publishTargets.filter((target) => target.implemented) as target (target.id)}
+                  <option disabled={!target.enabled} value={target.id}>
+                    {target.label}{target.enabled ? '' : ' (Unavailable)'}
+                  </option>
+                {/each}
+              </select>
+            </label>
+          </div>
         </div>
-        <div class="flex flex-wrap gap-2">
+
+        <div class="mt-4 flex flex-wrap gap-2">
           <button
             class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
-            disabled={!hasDraft || controlsDisabled}
+            disabled={!hasDraft || controlsDisabled || editorLocked}
             type="button"
-            onclick={() => void saveDraft()}
+            onclick={() => {
+              editorMode = 'edit';
+              void saveDraft();
+            }}
           >
             {saving ? 'Saving...' : 'Save'}
           </button>
           <button
             class="rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-            disabled={!hasDraft || controlsDisabled}
+            disabled={!hasDraft || controlsDisabled || editorLocked}
             type="button"
             onclick={() => void updateStatus('approved')}
           >
@@ -488,11 +1026,27 @@
           </button>
           <button
             class="rounded-md bg-red-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-            disabled={!hasDraft || controlsDisabled}
+            disabled={!hasDraft || controlsDisabled || editorLocked}
             type="button"
             onclick={() => void updateStatus('rejected')}
           >
             Reject
+          </button>
+          <button
+            class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+            disabled={!hasDraft || controlsDisabled}
+            type="button"
+            onclick={() => void copyMarkdownToClipboard()}
+          >
+            Copy Markdown
+          </button>
+          <button
+            class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+            disabled={!hasDraft || controlsDisabled}
+            type="button"
+            onclick={() => void downloadMarkdown()}
+          >
+            Download Markdown
           </button>
           <button
             class="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
@@ -500,48 +1054,172 @@
             type="button"
             onclick={() => void publishDraft()}
           >
-            Publish
+            {publishing ? 'Publishing...' : 'Publish'}
           </button>
+          {#if editorLocked}
+            <button
+              class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
+              type="button"
+              onclick={() => void createCopy()}
+            >
+              Create copy
+            </button>
+          {/if}
         </div>
       </div>
 
       <div class="space-y-4 p-4">
-        <label class="block">
-          <span class="text-sm font-medium text-slate-700">Title</span>
-          <input
-            class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
-            bind:value={editorTitle}
-            disabled={!hasDraft || generating}
-          />
-        </label>
+        {#if hasDraft && editorBundlePosts.length > 0}
+          <div class="flex flex-wrap gap-2">
+            {#each editorBundlePosts as post (post.id)}
+              <button
+                aria-pressed={post.slug === editorSlug}
+                class={`rounded-md border px-3 py-2 text-left text-sm ${
+                  post.slug === editorSlug
+                    ? 'border-slate-900 bg-slate-100 text-slate-950'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+                type="button"
+                onclick={() => loadDraftIntoEditor(post)}
+              >
+                <span class="block font-medium">{post.title}</span>
+                <span class="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                  <span>{post.contentType}</span>
+                  <span>{post.variantRole}</span>
+                  <span>{post.status}</span>
+                </span>
+              </button>
+            {/each}
+          </div>
+        {/if}
 
-        <label class="block">
-          <span class="text-sm font-medium text-slate-700">Ingress</span>
-          <textarea
-            class="mt-1 min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
-            bind:value={editorIngress}
-            disabled={!hasDraft || generating}
-          ></textarea>
-        </label>
+        {#if editorLocked}
+          <div
+            class="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+          >
+            <p class="font-medium">This post is locked because it has been published.</p>
+            <p class="mt-1">
+              Open it in preview or create a copy to continue editing without changing the published
+              version.
+            </p>
+          </div>
+        {/if}
 
-        <label class="block">
-          <span class="text-sm font-medium text-slate-700">Tags</span>
-          <input
-            class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
-            bind:value={editorTags}
-            disabled={!hasDraft || generating}
-          />
-        </label>
+        {#if editorPost}
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="rounded bg-slate-100 px-2 py-1 text-slate-700">{editorPost.status}</span>
+            <span class="rounded bg-slate-100 px-2 py-1 text-slate-700">
+              {editorPost.contentType}
+            </span>
+            <span class="rounded bg-slate-100 px-2 py-1 text-slate-700">
+              {editorPost.variantRole}
+            </span>
+            {#each editorPost.publicationSummary.publishedTargets as target (target)}
+              <span class="rounded bg-emerald-50 px-2 py-1 font-medium text-emerald-800">
+                Published: {target}
+              </span>
+            {/each}
+          </div>
+        {/if}
 
-        <label class="block">
-          <span class="text-sm font-medium text-slate-700">Markdown Body</span>
-          <textarea
-            class="mt-1 min-h-136 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm leading-6 outline-none focus:border-slate-900"
-            bind:value={editorBody}
-            disabled={!hasDraft || generating}
-            spellcheck="false"
-          ></textarea>
-        </label>
+        {#if editorRelatedPosts.length > 0}
+          <section class="rounded-md border border-slate-200 bg-slate-50 p-4">
+            <h3 class="text-sm font-semibold text-slate-900">Other bundle variants</h3>
+            <div class="mt-3 flex flex-wrap gap-2">
+              {#each editorRelatedPosts as related (related.id)}
+                <button
+                  class="rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+                  type="button"
+                  onclick={() => loadDraftIntoEditor(related)}
+                >
+                  <span class="block font-medium text-slate-900">{related.title}</span>
+                  <span class="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                    <span>{related.contentType}</span>
+                    <span>{related.variantRole}</span>
+                    <span>{related.status}</span>
+                  </span>
+                </button>
+              {/each}
+            </div>
+          </section>
+        {/if}
+
+        {#if hasDraft}
+          {#if editorMode === 'preview'}
+            <article class="space-y-4" id="draft-preview-panel">
+              <div>
+                <h3 class="text-2xl font-semibold text-slate-950">{editorTitle}</h3>
+                {#if editorIngress}
+                  <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{editorIngress}</p>
+                {/if}
+              </div>
+
+              {#if splitCsv(editorTags).length > 0}
+                <div class="flex flex-wrap gap-2">
+                  {#each splitCsv(editorTags) as tag (tag)}
+                    <span class="rounded bg-cyan-50 px-2 py-1 text-xs font-medium text-cyan-800">
+                      {tag}
+                    </span>
+                  {/each}
+                </div>
+              {/if}
+
+              <div
+                bind:this={previewRegion}
+                class="rounded-md bg-slate-950 p-4 text-sm leading-6 whitespace-pre-wrap text-slate-100"
+                tabindex="-1"
+              >
+                {editorBody}
+              </div>
+            </article>
+          {:else}
+            <div class="space-y-4" id="draft-edit-panel">
+              <label class="block">
+                <span class="text-sm font-medium text-slate-700">Title</span>
+                <input
+                  class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+                  bind:value={editorTitle}
+                  disabled={!hasDraft || controlsDisabled || editorLocked}
+                />
+              </label>
+
+              <label class="block">
+                <span class="text-sm font-medium text-slate-700">Ingress</span>
+                <textarea
+                  class="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+                  bind:value={editorIngress}
+                  disabled={!hasDraft || controlsDisabled || editorLocked}
+                ></textarea>
+              </label>
+
+              <label class="block">
+                <span class="text-sm font-medium text-slate-700">Tags</span>
+                <input
+                  class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+                  bind:value={editorTags}
+                  disabled={!hasDraft || controlsDisabled || editorLocked}
+                />
+              </label>
+
+              <label class="block">
+                <span class="text-sm font-medium text-slate-700">Markdown body</span>
+                <textarea
+                  bind:this={bodyEditor}
+                  class="mt-1 min-h-[34rem] w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm leading-6 outline-none focus:border-slate-900"
+                  bind:value={editorBody}
+                  disabled={!hasDraft || controlsDisabled || editorLocked}
+                  spellcheck="false"
+                ></textarea>
+              </label>
+            </div>
+          {/if}
+        {:else}
+          <div
+            class="rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-sm text-slate-500"
+          >
+            Generate a new bundle or open an existing draft to start reviewing content.
+          </div>
+        {/if}
       </div>
     </section>
   </section>
