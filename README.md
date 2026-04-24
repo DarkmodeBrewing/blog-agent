@@ -1,54 +1,69 @@
-# sv
+# Blog Agent
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+Blog Agent is a SvelteKit application for generating, reviewing, exporting, and publishing bundled content variants. The current product model is:
 
-## Creating a project
+- primary `blog` draft generation
+- derived `x` and `linkedin` variants
+- local SQLite storage with Drizzle
+- Markdown export by default
+- optional GitHub repository publishing
+- application-managed settings stored in the database
 
-If you're seeing this, you've probably already done this step. Congrats!
+## Documentation
+
+- [Setup](docs/setup.md)
+- [Publishing Adapters](docs/publishing-adapters.md)
+- [Content Model](docs/content-model.md)
+- [Generation Workflow](docs/generation-workflow.md)
+- [Migration Notes](docs/migration-notes.md)
+- [Task Breakdown](docs/tasks.md)
+
+## Development
+
+Install dependencies:
 
 ```sh
-# create a new project
-npx sv create my-app
+npm install
 ```
 
-To recreate this project with the same configuration:
-
-```sh
-# recreate this project
-npx sv@0.15.1 create --template minimal --types ts --add prettier eslint sveltekit-adapter="adapter:node" --no-download-check --install npm .
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+Start the local development server:
 
 ```sh
 npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
 ```
 
-When running through code-server's forwarded proxy, set the dev origin so Vite generates bundle URLs under the proxy path:
+For a proxied code-server setup:
 
 ```sh
 npm run dev:proxy
 ```
 
-If native dependencies were installed with a different Node.js version than the one running the dev server, rebuild them from the same terminal:
+If `better-sqlite3` was built against another Node.js version:
 
 ```sh
 npm run rebuild:native
 ```
 
-## Building
+## Database
 
-To create a production version of your app:
+Generate migrations:
 
 ```sh
-npm run build
+npm run db:generate
 ```
 
-You can preview the production build with `npm run preview`.
+Apply migrations:
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+```sh
+npm run db:migrate
+```
+
+The runtime still includes a SQLite compatibility bootstrap so older local databases remain usable while migrations catch up.
+
+## Verification
+
+```sh
+npm run check
+npm run lint
+npm run build
+```

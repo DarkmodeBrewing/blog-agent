@@ -15,7 +15,7 @@ This document breaks the requested changes into implementation phases in the ord
 - [x] Phase 9: UI refactor
 - [x] Phase 10: Accessibility, usability, and responsive pass
 - [x] Phase 11: Logging and observability adjustments
-- [ ] Phase 12: Cleanup and documentation
+- [x] Phase 12: Cleanup and documentation
 
 ## Phase 0: Decisions and Constraints
 
@@ -280,16 +280,18 @@ Status: Completed
 
 ## Phase 12: Cleanup and Documentation
 
-- Remove obsolete routes and code paths.
-  - old dashboard route
-  - env-dependent configuration paths once migration is complete
-  - old single-blog-only generation logic
-- Update docs for:
-  - application setup
-  - publishing adapters
-  - content model
-  - generation workflow
-- Add migration notes for existing local databases.
+- Status: Completed
+
+- [x] Remove obsolete routes and code paths.
+  - [x] old dashboard route
+  - [x] env-dependent configuration paths once migration is complete
+  - [x] old single-blog-only generation logic
+- [x] Update docs for:
+  - [x] application setup
+  - [x] publishing adapters
+  - [x] content model
+  - [x] generation workflow
+- [x] Add migration notes for existing local databases.
 
 ## Suggested Execution Order
 
