@@ -2,7 +2,7 @@
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
   import { apiUrl, requestJson } from '$lib/client/request-json';
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
 
   type PostStatus = 'synced' | 'draft' | 'approved' | 'committed' | 'rejected';
   type DesiredLength = 'short' | 'medium' | 'long';
@@ -177,6 +177,8 @@
   let controlsDisabled = $derived(generating || saving || publishing || generationBlocked);
 
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
+  let previewRegion = $state<HTMLDivElement | null>(null);
+  let bodyEditor = $state<HTMLTextAreaElement | null>(null);
 
   const splitCsv = (value: string) =>
     value
@@ -314,6 +316,18 @@
     editorTags = post.tags.join(', ');
     editorBody = post.body;
     editorMode = 'preview';
+  };
+
+  const setEditorMode = async (mode: 'preview' | 'edit') => {
+    editorMode = mode;
+    await tick();
+
+    if (mode === 'preview') {
+      previewRegion?.focus();
+      return;
+    }
+
+    bodyEditor?.focus();
   };
 
   const applyRouteIntent = async (availablePosts: PostRecord[]) => {
@@ -643,6 +657,7 @@
 <div class="space-y-4">
   {#if statusMessage}
     <p
+      aria-live="polite"
       class="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800"
     >
       {statusMessage}
@@ -650,7 +665,10 @@
   {/if}
 
   {#if errorMessage}
-    <p class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+    <p
+      aria-live="assertive"
+      class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+    >
       {errorMessage}
     </p>
   {/if}
@@ -945,23 +963,25 @@
             <div class="inline-flex rounded-md border border-slate-300 p-1">
               <button
                 aria-pressed={editorMode === 'preview'}
+                aria-controls="draft-preview-panel"
                 class={`rounded px-3 py-1.5 text-sm font-medium ${
                   editorMode === 'preview' ? 'bg-slate-950 text-white' : 'text-slate-700'
                 }`}
                 disabled={!hasDraft}
                 type="button"
-                onclick={() => (editorMode = 'preview')}
+                onclick={() => void setEditorMode('preview')}
               >
                 Preview
               </button>
               <button
                 aria-pressed={editorMode === 'edit'}
+                aria-controls="draft-edit-panel"
                 class={`rounded px-3 py-1.5 text-sm font-medium ${
                   editorMode === 'edit' ? 'bg-slate-950 text-white' : 'text-slate-700'
                 }`}
                 disabled={!hasDraft || editorLocked}
                 type="button"
-                onclick={() => (editorMode = 'edit')}
+                onclick={() => void setEditorMode('edit')}
               >
                 Edit
               </button>
@@ -1053,6 +1073,7 @@
           <div class="flex flex-wrap gap-2">
             {#each editorBundlePosts as post (post.id)}
               <button
+                aria-pressed={post.slug === editorSlug}
                 class={`rounded-md border px-3 py-2 text-left text-sm ${
                   post.slug === editorSlug
                     ? 'border-slate-900 bg-slate-100 text-slate-950'
@@ -1125,7 +1146,7 @@
 
         {#if hasDraft}
           {#if editorMode === 'preview'}
-            <article class="space-y-4">
+            <article class="space-y-4" id="draft-preview-panel">
               <div>
                 <h3 class="text-2xl font-semibold text-slate-950">{editorTitle}</h3>
                 {#if editorIngress}
@@ -1144,13 +1165,15 @@
               {/if}
 
               <div
+                bind:this={previewRegion}
                 class="rounded-md bg-slate-950 p-4 text-sm leading-6 whitespace-pre-wrap text-slate-100"
+                tabindex="-1"
               >
                 {editorBody}
               </div>
             </article>
           {:else}
-            <div class="space-y-4">
+            <div class="space-y-4" id="draft-edit-panel">
               <label class="block">
                 <span class="text-sm font-medium text-slate-700">Title</span>
                 <input
@@ -1181,6 +1204,7 @@
               <label class="block">
                 <span class="text-sm font-medium text-slate-700">Markdown body</span>
                 <textarea
+                  bind:this={bodyEditor}
                   class="mt-1 min-h-[34rem] w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm leading-6 outline-none focus:border-slate-900"
                   bind:value={editorBody}
                   disabled={!hasDraft || controlsDisabled || editorLocked}

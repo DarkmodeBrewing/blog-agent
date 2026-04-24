@@ -2,6 +2,7 @@
   import './layout.css';
   import favicon from '$lib/assets/favicon.svg';
   import { resolve } from '$app/paths';
+  import { page } from '$app/state';
 
   type ReadinessIssue = {
     id: string;
@@ -29,13 +30,32 @@
 </script>
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
+<a class="skip-link" href="#main-content">Skip to main content</a>
 <header class="bg-(--color_header_bg) p-4 text-(--color_header_fg)">
-  <div class="mx-auto flex max-w-6xl items-center justify-between gap-4">
+  <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4">
     <img width="75" src={favicon} alt="Blog-agent" />
-    <nav aria-label="Primary" class="flex items-center gap-4 text-lg">
-      <a class="hover:underline" href={resolve('/')}>Home</a>
-      <a class="hover:underline" href={resolve('/drafts')}>Generate post</a>
-      <a class="hover:underline" href={resolve('/posts')}>Posts</a>
+    <nav aria-label="Primary" class="flex flex-wrap items-center gap-3 text-base md:text-lg">
+      <a
+        aria-current={page.url.pathname === '/' ? 'page' : undefined}
+        class="hover:underline"
+        href={resolve('/')}
+      >
+        Home
+      </a>
+      <a
+        aria-current={page.url.pathname.startsWith('/drafts') ? 'page' : undefined}
+        class="hover:underline"
+        href={resolve('/drafts')}
+      >
+        Generate post
+      </a>
+      <a
+        aria-current={page.url.pathname.startsWith('/posts') ? 'page' : undefined}
+        class="hover:underline"
+        href={resolve('/posts')}
+      >
+        Posts
+      </a>
       <a
         aria-label="Settings"
         class="inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-700 text-slate-100 transition hover:bg-slate-800"
@@ -84,6 +104,6 @@
     </div>
   </div>
 {/if}
-<main class="mx-auto max-w-6xl px-6 py-10">
+<main class="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10" id="main-content">
   {@render children()}
 </main>

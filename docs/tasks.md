@@ -13,7 +13,7 @@ This document breaks the requested changes into implementation phases in the ord
 - [x] Phase 7: API refactor
 - [x] Phase 8: Database and Drizzle migration
 - [x] Phase 9: UI refactor
-- [ ] Phase 10: Accessibility, usability, and responsive pass
+- [x] Phase 10: Accessibility, usability, and responsive pass
 - [ ] Phase 11: Logging and observability adjustments
 - [ ] Phase 12: Cleanup and documentation
 
@@ -247,19 +247,21 @@ Status: Completed
 
 ## Phase 10: Accessibility, Usability, and Responsive Pass
 
-- Audit and fix semantic landmarks and heading structure.
-- Add accessible names and descriptions for icon buttons and status indicators.
-- Verify keyboard access for:
-  - header navigation
-  - filters
-  - editor toggle
-  - publish actions
-  - settings form controls
-- Check focus management when switching between preview/edit states.
-- Add visible focus states throughout.
-- Review ARIA usage and remove unnecessary ARIA where native semantics are better.
-- Test color contrast and status communication.
-- Make layouts scale from XL/desktop down to narrow mobile widths without horizontal breakage.
+- Status: Completed
+
+- [x] Audit and fix semantic landmarks and heading structure.
+- [x] Add accessible names and descriptions for icon buttons and status indicators.
+- [x] Verify keyboard access for:
+  - [x] header navigation
+  - [x] filters
+  - [x] editor toggle
+  - [x] publish actions
+  - [x] settings form controls
+- [x] Check focus management when switching between preview/edit states.
+- [x] Add visible focus states throughout.
+- [x] Review ARIA usage and remove unnecessary ARIA where native semantics are better.
+- [x] Test color contrast and status communication.
+- [x] Make layouts scale from XL/desktop down to narrow mobile widths without horizontal breakage.
 - Ensure tables and dense listings collapse responsibly on small screens.
 
 ## Phase 11: Logging and Observability Adjustments

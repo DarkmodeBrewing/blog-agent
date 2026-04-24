@@ -209,11 +209,12 @@
       <h2 class="text-base font-semibold text-slate-950">By Model</h2>
       <div class="mt-3 overflow-auto">
         <table class="w-full text-left text-sm">
+          <caption class="sr-only">Token totals and call counts grouped by model.</caption>
           <thead class="text-xs text-slate-500 uppercase">
             <tr>
-              <th class="py-2">Model</th>
-              <th class="py-2 text-right">Tokens</th>
-              <th class="py-2 text-right">Calls</th>
+              <th class="py-2" scope="col">Model</th>
+              <th class="py-2 text-right" scope="col">Tokens</th>
+              <th class="py-2 text-right" scope="col">Calls</th>
             </tr>
           </thead>
           <tbody>
@@ -233,11 +234,12 @@
       <h2 class="text-base font-semibold text-slate-950">Recent Sessions</h2>
       <div class="mt-3 max-h-96 overflow-auto">
         <table class="w-full text-left text-sm">
+          <caption class="sr-only">Recent token usage sessions.</caption>
           <thead class="text-xs text-slate-500 uppercase">
             <tr>
-              <th class="py-2">Session</th>
-              <th class="py-2">Model</th>
-              <th class="py-2 text-right">Tokens</th>
+              <th class="py-2" scope="col">Session</th>
+              <th class="py-2" scope="col">Model</th>
+              <th class="py-2 text-right" scope="col">Tokens</th>
             </tr>
           </thead>
           <tbody>
@@ -258,14 +260,15 @@
     <h2 class="text-base font-semibold text-slate-950">Recent Calls</h2>
     <div class="mt-3 overflow-auto">
       <table class="w-full text-left text-sm">
+        <caption class="sr-only">Most recent OpenAI calls recorded by the application.</caption>
         <thead class="text-xs text-slate-500 uppercase">
           <tr>
-            <th class="py-2">Time</th>
-            <th class="py-2">Stage</th>
-            <th class="py-2">Model</th>
-            <th class="py-2 text-right">Input</th>
-            <th class="py-2 text-right">Output</th>
-            <th class="py-2 text-right">Total</th>
+            <th class="py-2" scope="col">Time</th>
+            <th class="py-2" scope="col">Stage</th>
+            <th class="py-2" scope="col">Model</th>
+            <th class="py-2 text-right" scope="col">Input</th>
+            <th class="py-2 text-right" scope="col">Output</th>
+            <th class="py-2 text-right" scope="col">Total</th>
           </tr>
         </thead>
         <tbody>

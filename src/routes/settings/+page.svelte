@@ -435,7 +435,7 @@
     </p>
   {/if}
 
-  <section class="space-y-4" id="setup">
+  <section class="scroll-mt-6 space-y-4" id="setup">
     <div>
       <h2 class="text-lg font-semibold text-slate-950">App setup</h2>
       <p class="text-sm text-slate-500">
@@ -558,7 +558,7 @@
     </div>
   </section>
 
-  <section class="space-y-4" id="models">
+  <section class="scroll-mt-6 space-y-4" id="models">
     <div>
       <h2 class="text-lg font-semibold text-slate-950">Models</h2>
       <p class="text-sm text-slate-500">
@@ -586,7 +586,7 @@
         </select>
       </label>
 
-      <div class="flex gap-2">
+      <div class="flex flex-col gap-2 sm:flex-row">
         <input
           bind:value={newModel}
           class="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-900"
@@ -619,7 +619,7 @@
     </section>
   </section>
 
-  <section class="space-y-4" id="publishing">
+  <section class="scroll-mt-6 space-y-4" id="publishing">
     <div>
       <h2 class="text-lg font-semibold text-slate-950">Publishing targets</h2>
       <p class="text-sm text-slate-500">
@@ -662,7 +662,7 @@
     </div>
   </section>
 
-  <section class="space-y-4" id="frontmatter">
+  <section class="scroll-mt-6 space-y-4" id="frontmatter">
     <div>
       <h2 class="text-lg font-semibold text-slate-950">Frontmatter</h2>
       <p class="text-sm text-slate-500">
@@ -741,7 +741,7 @@
         <div class="space-y-2">
           {#each frontmatterOrder as field, index (field)}
             <div
-              class="flex items-center justify-between gap-3 rounded-md bg-white px-3 py-2 text-sm"
+              class="flex flex-col gap-2 rounded-md bg-white px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between"
             >
               <span class="text-slate-800 capitalize">{field}</span>
               <div class="flex gap-2">
@@ -769,7 +769,7 @@
     </section>
   </section>
 
-  <section class="space-y-4" id="prompts">
+  <section class="scroll-mt-6 space-y-4" id="prompts">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <h2 class="text-lg font-semibold text-slate-950">Prompts</h2>

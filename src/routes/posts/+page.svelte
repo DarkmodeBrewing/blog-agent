@@ -185,15 +185,19 @@
     {:else}
       <div class="overflow-x-auto">
         <table class="w-full min-w-[70rem] text-left text-sm">
+          <caption class="sr-only">
+            Bundled post library with content types, editorial state, publishing state, source, and
+            update time.
+          </caption>
           <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
             <tr>
-              <th class="px-4 py-3">Title</th>
-              <th class="px-4 py-3">Types</th>
-              <th class="px-4 py-3">Editorial</th>
-              <th class="px-4 py-3">Published</th>
-              <th class="px-4 py-3">Source</th>
-              <th class="px-4 py-3">Updated</th>
-              <th class="px-4 py-3">Variants</th>
+              <th class="px-4 py-3" scope="col">Title</th>
+              <th class="px-4 py-3" scope="col">Types</th>
+              <th class="px-4 py-3" scope="col">Editorial</th>
+              <th class="px-4 py-3" scope="col">Published</th>
+              <th class="px-4 py-3" scope="col">Source</th>
+              <th class="px-4 py-3" scope="col">Updated</th>
+              <th class="px-4 py-3" scope="col">Variants</th>
             </tr>
           </thead>
           <tbody>
