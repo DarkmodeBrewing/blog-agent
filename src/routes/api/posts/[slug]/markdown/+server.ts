@@ -5,7 +5,7 @@ import { getPostBySlug } from '$lib/server/post-library';
 import { renderPostAsMarkdown } from '$lib/server/publishing';
 import { createRequestId, logWorkflow } from '$lib/server/workflow-log';
 
-export const GET: RequestHandler = ({ params }) => {
+export const GET: RequestHandler = async ({ params }) => {
   const requestId = createRequestId();
   const parsedSlug = BlogSlugSchema.safeParse(params.slug);
 
@@ -36,6 +36,6 @@ export const GET: RequestHandler = ({ params }) => {
 
   return json({
     post,
-    artifact: renderPostAsMarkdown(post)
+    artifact: await renderPostAsMarkdown(post)
   });
 };

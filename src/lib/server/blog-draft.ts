@@ -314,7 +314,7 @@ const generateDerivedVariant = async (
     blogDraft: {
       title: primary.title,
       slug: primary.slug,
-      ingress: primary.ingress,
+      ingress: primary.ingress ?? undefined,
       body: primary.body,
       tags: primary.tags ?? []
     }

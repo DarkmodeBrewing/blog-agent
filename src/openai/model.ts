@@ -51,9 +51,9 @@ export const GeneratedDraftSchema = z.object({
   title: z.string().min(8),
   slug: BlogSlugSchema,
   body: z.string().min(50),
-  tags: z.array(z.string()).min(1).optional(),
-  ingress: z.string().min(15).optional(),
-  category: z.string().min(1).optional(),
+  tags: z.array(z.string()).min(1).nullable(),
+  ingress: z.string().min(15).nullable(),
+  category: z.string().min(1).nullable(),
   generationNotes: z.string(),
   sourcePostUsed: z.array(z.string())
 });
@@ -65,9 +65,9 @@ export const createGeneratedDraftSchema = (frontmatter: BlogFrontmatterPreferenc
     title: z.string().min(8),
     slug: BlogSlugSchema,
     body: z.string().min(50),
-    tags: frontmatter.tags ? z.array(z.string()).min(1) : z.array(z.string()).min(1).optional(),
-    ingress: frontmatter.ingress ? z.string().min(15) : z.string().min(15).optional(),
-    category: z.string().min(1).optional(),
+    tags: frontmatter.tags ? z.array(z.string()).min(1) : z.array(z.string()).min(1).nullable(),
+    ingress: frontmatter.ingress ? z.string().min(15) : z.string().min(15).nullable(),
+    category: frontmatter.category ? z.string().min(1) : z.string().min(1).nullable(),
     generationNotes: z.string(),
     sourcePostUsed: z.array(z.string())
   });

@@ -1,4 +1,9 @@
-export const apiUrl = (path: string) => path.replace(/^\//, '');
+import { base } from '$app/paths';
+
+export const apiUrl = (path: string) => {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return `${base}${normalizedPath}`;
+};
 
 export const requestJson = async <T>(endpoint: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(endpoint, init);

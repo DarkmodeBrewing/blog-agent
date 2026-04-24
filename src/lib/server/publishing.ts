@@ -1,6 +1,7 @@
 import matter from 'gray-matter';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import prettier from 'prettier';
 import {
   getFrontmatterTemplate,
   getGitHubPublishSettings,
@@ -132,10 +133,21 @@ const buildFrontmatter = (post: PostRecord) => {
   return frontmatter;
 };
 
-export const renderPostAsMarkdown = (post: PostRecord) => {
+const formatMarkdown = async (content: string) => {
+  try {
+    return await prettier.format(content, {
+      parser: 'markdown'
+    });
+  } catch {
+    return content;
+  }
+};
+
+export const renderPostAsMarkdown = async (post: PostRecord) => {
   const frontmatter = buildFrontmatter(post);
   const hasFrontmatter = Object.keys(frontmatter).length > 0;
-  const content = hasFrontmatter ? matter.stringify(post.body, frontmatter) : post.body;
+  const rawContent = hasFrontmatter ? matter.stringify(post.body, frontmatter) : post.body;
+  const content = await formatMarkdown(rawContent);
 
   return {
     filename: `${post.slug}.md`,
@@ -144,11 +156,11 @@ export const renderPostAsMarkdown = (post: PostRecord) => {
   };
 };
 
-const publishMarkdownDownload = (
+const publishMarkdownDownload = async (
   post: PostRecord,
   options?: { actionId?: string | null; requestId?: string | null }
-): PublishResult => {
-  const artifact = renderPostAsMarkdown(post);
+): Promise<PublishResult> => {
+  const artifact = await renderPostAsMarkdown(post);
   const publishedPost = recordPostPublication(post.slug, {
     target: 'markdown_download',
     status: 'published',
@@ -181,10 +193,10 @@ const publishMarkdownDownload = (
   };
 };
 
-const publishMarkdownDiskExport = (
+const publishMarkdownDiskExport = async (
   post: PostRecord,
   options?: { actionId?: string | null; requestId?: string | null }
-): PublishResult => {
+): Promise<PublishResult> => {
   const settings = getMarkdownExportSettings();
 
   if (!settings.diskExportEnabled) {
@@ -195,7 +207,7 @@ const publishMarkdownDiskExport = (
     throw new Error('Markdown disk export path is not configured');
   }
 
-  const artifact = renderPostAsMarkdown(post);
+  const artifact = await renderPostAsMarkdown(post);
   const filePath = resolve(settings.diskExportPath, artifact.filename);
   mkdirSync(dirname(filePath), { recursive: true });
   writeFileSync(filePath, artifact.content, 'utf-8');
@@ -241,7 +253,7 @@ const publishGitHubRepo = async (
   const octokit = getOctokit();
   const config = getGitHubRepoConfig();
   const path = post.githubPath ?? `${config.blogPostPath}/${post.slug}.md`;
-  const artifact = renderPostAsMarkdown(post);
+  const artifact = await renderPostAsMarkdown(post);
 
   logWorkflow({
     level: 'info',
