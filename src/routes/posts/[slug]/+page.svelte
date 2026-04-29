@@ -197,7 +197,7 @@
           </div>
         </div>
 
-        {#if currentPost.lockedAt}
+        {#if currentPost.isPublished}
           <p class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
             This post is locked because it has been published. Create a copy to continue editing.
           </p>

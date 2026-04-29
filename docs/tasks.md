@@ -296,12 +296,14 @@ Status: Completed
 
 ## Phase 13: Publication Lifecycle and Deletion Workflow
 
-- Reclassify publish targets into:
+- Status: In progress
+
+- [x] Reclassify publish targets into:
   - export targets
   - live publication targets
-- Stop treating export targets as live publication state.
-  - `markdown_download` must not lock content
-  - `markdown_disk_export` should be evaluated explicitly as export-only or managed publication
+- [x] Stop treating export targets as live publication state.
+  - [x] `markdown_download` must not lock content
+  - [x] `markdown_disk_export` is currently treated as export-only in the application state model
 - Extend publication records.
   - add `unpublished` delivery state
   - add `unpublished_at`
@@ -317,8 +319,8 @@ Status: Completed
 - Decide and implement disk-export unpublish semantics.
   - delete exported file
   - or move/archive file
-- Recalculate lock/editability from active live publications only.
-  - no lock from download-only/export-only actions
+- [x] Recalculate lock/editability from active live publications only.
+  - [x] no lock from download-only/export-only actions
 - Add unpublish APIs.
   - unpublish by target
   - optional `unpublish all and return to draft`

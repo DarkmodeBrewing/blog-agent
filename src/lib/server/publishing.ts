@@ -15,6 +15,7 @@ import {
   type PublishTarget as PostPublishTarget
 } from './post-library';
 import { getGitHubRepoConfig } from './get-posts-from-repo';
+import { getPublishTargetKind } from './publication-targets';
 import { logWorkflow } from './workflow-log';
 
 export type PublishTarget = PostPublishTarget;
@@ -25,7 +26,8 @@ export type PublishTargetDefinition = {
   description: string;
   implemented: boolean;
   requiresConfiguration: boolean;
-  kind: 'markdown' | 'repository' | 'cms' | 'social';
+  kind: 'export' | 'live_publication';
+  channel: 'markdown' | 'repository' | 'cms' | 'social';
 };
 
 export type PublishArtifact = {
@@ -50,7 +52,8 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     description: 'Return a Markdown artifact that can be downloaded in the browser.',
     implemented: true,
     requiresConfiguration: false,
-    kind: 'markdown'
+    kind: 'export',
+    channel: 'markdown'
   },
   {
     id: 'markdown_disk_export',
@@ -58,7 +61,8 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     description: 'Write Markdown to a configured server-side export directory.',
     implemented: true,
     requiresConfiguration: true,
-    kind: 'markdown'
+    kind: 'export',
+    channel: 'markdown'
   },
   {
     id: 'github_repo',
@@ -66,7 +70,8 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     description: 'Commit Markdown into a configured GitHub repository.',
     implemented: true,
     requiresConfiguration: true,
-    kind: 'repository'
+    kind: 'live_publication',
+    channel: 'repository'
   },
   {
     id: 'cms_contentful',
@@ -74,7 +79,8 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     description: 'Reserved CMS adapter placeholder.',
     implemented: false,
     requiresConfiguration: true,
-    kind: 'cms'
+    kind: 'live_publication',
+    channel: 'cms'
   },
   {
     id: 'social_x',
@@ -82,7 +88,8 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     description: 'Reserved social adapter placeholder.',
     implemented: false,
     requiresConfiguration: true,
-    kind: 'social'
+    kind: 'live_publication',
+    channel: 'social'
   },
   {
     id: 'social_linkedin',
@@ -90,7 +97,8 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     description: 'Reserved social adapter placeholder.',
     implemented: false,
     requiresConfiguration: true,
-    kind: 'social'
+    kind: 'live_publication',
+    channel: 'social'
   }
 ];
 
@@ -420,6 +428,7 @@ export const publishPost = async (
       target
     },
     details: {
+      targetKind: getPublishTargetKind(target),
       editable: post.isEditable,
       publishedTargets: post.publicationSummary.publishedTargets
     }

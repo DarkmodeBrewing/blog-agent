@@ -22,6 +22,7 @@ import {
   insertPublicationRecord,
   lockPublishedPostById
 } from './repositories/publishing-repository';
+import { isLivePublicationTarget } from './publication-targets';
 import { selectSyncedPostRowBySlug } from './repositories/sync-repository';
 
 export type PostStatus = 'synced' | 'draft' | 'approved' | 'committed' | 'rejected';
@@ -56,6 +57,8 @@ export type PostPublicationRecord = {
 export type PublicationSummary = {
   total: number;
   publishedTargets: PublishTarget[];
+  livePublishedTargets: PublishTarget[];
+  exportedTargets: PublishTarget[];
   failedTargets: PublishTarget[];
   latestPublishedAt: string | null;
   latestTarget: PublishTarget | null;
@@ -176,14 +179,19 @@ const getPublicationSummary = (
   const implicitGitHubPublished =
     post?.source === 'github' && post.status === 'synced' && Boolean(post.githubPath);
   const publishedTargets = [...new Set(published.map((publication) => publication.target))];
+  const livePublishedTargets = publishedTargets.filter((target) => isLivePublicationTarget(target));
+  const exportedTargets = publishedTargets.filter((target) => !isLivePublicationTarget(target));
 
   if (implicitGitHubPublished) {
     publishedTargets.unshift('github_repo');
+    livePublishedTargets.unshift('github_repo');
   }
 
   return {
     total: publications.length,
     publishedTargets: [...new Set(publishedTargets)],
+    livePublishedTargets: [...new Set(livePublishedTargets)],
+    exportedTargets: [...new Set(exportedTargets)],
     failedTargets: [...new Set(failed.map((publication) => publication.target))],
     latestPublishedAt: latestPublished?.publishedAt ?? null,
     latestTarget: latestPublished?.target ?? (implicitGitHubPublished ? 'github_repo' : null)
@@ -196,8 +204,8 @@ const mapPostRow = (
 ): PostRecord => {
   const publications = publicationsByPostId?.get(row.id) ?? listPostPublications(row.id);
   const publicationSummary = getPublicationSummary(publications, row);
-  const isPublished = publicationSummary.publishedTargets.length > 0;
-  const isEditable = !row.lockedAt && !isPublished;
+  const isPublished = publicationSummary.livePublishedTargets.length > 0;
+  const isEditable = !isPublished;
 
   return {
     id: row.id,
@@ -775,7 +783,9 @@ export const recordPostPublication = (
   });
 
   if (input.status === 'published') {
-    lockPublishedPostById(post.id);
+    if (isLivePublicationTarget(input.target)) {
+      lockPublishedPostById(post.id);
+    }
   }
 
   return getPostBySlug(slug);
