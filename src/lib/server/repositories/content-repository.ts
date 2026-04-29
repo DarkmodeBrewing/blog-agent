@@ -129,3 +129,14 @@ export const lockPostById = (postId: number) => {
     .where(eq(posts.id, postId))
     .run();
 };
+
+export const unlockPostById = (postId: number) => {
+  getDatabase()
+    .update(posts)
+    .set({
+      lockedAt: null,
+      updatedAt: sql`datetime('now')`
+    })
+    .where(eq(posts.id, postId))
+    .run();
+};

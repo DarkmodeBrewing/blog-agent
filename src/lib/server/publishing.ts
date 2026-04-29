@@ -9,6 +9,7 @@ import {
 } from './app-settings';
 import { getOctokit } from './clients';
 import {
+  getLatestPublicationForTarget,
   getPostBySlug,
   recordPostPublication,
   type PostRecord,
@@ -28,6 +29,7 @@ export type PublishTargetDefinition = {
   requiresConfiguration: boolean;
   kind: 'export' | 'live_publication';
   channel: 'markdown' | 'repository' | 'cms' | 'social';
+  supportsUnpublish: boolean;
 };
 
 export type PublishArtifact = {
@@ -53,7 +55,8 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     implemented: true,
     requiresConfiguration: false,
     kind: 'export',
-    channel: 'markdown'
+    channel: 'markdown',
+    supportsUnpublish: false
   },
   {
     id: 'markdown_disk_export',
@@ -62,7 +65,8 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     implemented: true,
     requiresConfiguration: true,
     kind: 'export',
-    channel: 'markdown'
+    channel: 'markdown',
+    supportsUnpublish: false
   },
   {
     id: 'github_repo',
@@ -71,7 +75,8 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     implemented: true,
     requiresConfiguration: true,
     kind: 'live_publication',
-    channel: 'repository'
+    channel: 'repository',
+    supportsUnpublish: true
   },
   {
     id: 'cms_contentful',
@@ -80,7 +85,8 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     implemented: false,
     requiresConfiguration: true,
     kind: 'live_publication',
-    channel: 'cms'
+    channel: 'cms',
+    supportsUnpublish: false
   },
   {
     id: 'social_x',
@@ -89,7 +95,8 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     implemented: false,
     requiresConfiguration: true,
     kind: 'live_publication',
-    channel: 'social'
+    channel: 'social',
+    supportsUnpublish: false
   },
   {
     id: 'social_linkedin',
@@ -98,7 +105,8 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     implemented: false,
     requiresConfiguration: true,
     kind: 'live_publication',
-    channel: 'social'
+    channel: 'social',
+    supportsUnpublish: false
   }
 ];
 
@@ -394,6 +402,11 @@ export const isPublishTargetReady = (target: PublishTarget) => {
   }
 };
 
+export const canUnpublishTarget = (target: PublishTarget) => {
+  const definition = publishTargetDefinitions.find((item) => item.id === target);
+  return Boolean(definition?.implemented && definition.supportsUnpublish);
+};
+
 export const publishPost = async (
   slug: string,
   target: PublishTarget = 'markdown_download',
@@ -447,5 +460,125 @@ export const publishPost = async (
       return publishGitHubRepo(post, options);
     default:
       throw new Error(`Publish target is not implemented yet: ${target}`);
+  }
+};
+
+const unpublishGitHubRepo = async (
+  post: PostRecord,
+  options?: { actionId?: string | null; requestId?: string | null; returnToDraft?: boolean }
+) => {
+  const octokit = getOctokit();
+  const config = getGitHubRepoConfig();
+  const latestPublication = getLatestPublicationForTarget(post.slug, 'github_repo');
+
+  if (!latestPublication || latestPublication.status !== 'published') {
+    throw new Error('Post is not currently published to GitHub');
+  }
+
+  const path =
+    latestPublication.filePath ?? post.githubPath ?? `${config.blogPostPath}/${post.slug}.md`;
+  let sha = latestPublication.externalId ?? null;
+
+  if (!sha) {
+    const existing = await octokit.rest.repos.getContent({
+      owner: config.owner,
+      repo: config.repo,
+      path,
+      ref: config.ref
+    });
+
+    if (Array.isArray(existing.data) || existing.data.type !== 'file') {
+      throw new Error(`GitHub path is not a file: ${path}`);
+    }
+
+    sha = existing.data.sha;
+  }
+
+  const result = await octokit.rest.repos.deleteFile({
+    owner: config.owner,
+    repo: config.repo,
+    path,
+    branch: config.ref,
+    message: `Unpublish blog post: ${post.title}`,
+    sha
+  });
+
+  const unpublishedPost = recordPostPublication(post.slug, {
+    target: 'github_repo',
+    status: 'unpublished',
+    filePath: path,
+    commitSha: result.data.commit.sha,
+    externalId: sha,
+    remoteUrl: latestPublication.remoteUrl,
+    artifact: latestPublication.artifact
+  });
+
+  if (!unpublishedPost) {
+    throw new Error(`Post not found while recording unpublish: ${post.slug}`);
+  }
+
+  let nextPost = unpublishedPost;
+
+  if (
+    options?.returnToDraft &&
+    unpublishedPost.publicationSummary.livePublishedTargets.length === 0
+  ) {
+    const { updatePostStatus } = await import('./post-library');
+    nextPost =
+      updatePostStatus(unpublishedPost.slug, 'draft', 'Returned to draft after unpublish') ??
+      unpublishedPost;
+  }
+
+  return {
+    post: nextPost,
+    commitSha: result.data.commit.sha
+  };
+};
+
+export const unpublishPost = async (
+  slug: string,
+  target: PublishTarget,
+  options?: { actionId?: string | null; requestId?: string | null; returnToDraft?: boolean }
+) => {
+  const definition = publishTargetDefinitions.find((item) => item.id === target);
+  if (!definition) {
+    throw new Error(`Unsupported publish target: ${target}`);
+  }
+
+  if (!definition.implemented || !definition.supportsUnpublish) {
+    throw new Error(`Unpublish is not supported for target: ${target}`);
+  }
+
+  if (!isPublishTargetReady(target)) {
+    throw new Error(`Publish target is not configured: ${target}`);
+  }
+
+  const post = getPostBySlug(slug);
+
+  if (!post) {
+    return null;
+  }
+
+  logWorkflow({
+    level: 'info',
+    message: 'post.unpublish.attempted',
+    context: {
+      actionId: options?.actionId ?? null,
+      requestId: options?.requestId ?? null,
+      slug,
+      target
+    },
+    details: {
+      targetKind: getPublishTargetKind(target),
+      currentlyPublishedTargets: post.publicationSummary.livePublishedTargets,
+      returnToDraft: Boolean(options?.returnToDraft)
+    }
+  });
+
+  switch (target) {
+    case 'github_repo':
+      return unpublishGitHubRepo(post, options);
+    default:
+      throw new Error(`Unpublish is not implemented yet for target: ${target}`);
   }
 };

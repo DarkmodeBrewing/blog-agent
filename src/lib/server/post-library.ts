@@ -20,7 +20,8 @@ import {
 } from './repositories/content-repository';
 import {
   insertPublicationRecord,
-  lockPublishedPostById
+  lockPublishedPostById,
+  unlockPublishedPostById
 } from './repositories/publishing-repository';
 import { isLivePublicationTarget } from './publication-targets';
 import { selectSyncedPostRowBySlug } from './repositories/sync-repository';
@@ -30,6 +31,7 @@ export type PostSource = 'github' | 'generated' | 'manual';
 export type PostContentType = 'blog' | 'x' | 'linkedin' | 'instagram' | 'generic';
 export type PostVariantRole = 'primary' | 'derived' | 'standalone';
 export type PublicationStatus = 'not_published' | 'published' | 'failed';
+export type PublicationLifecycleStatus = PublicationStatus | 'unpublished';
 export type PublishTarget =
   | 'markdown_download'
   | 'markdown_disk_export'
@@ -42,7 +44,7 @@ export type PostPublicationRecord = {
   id: number;
   postId: number;
   target: PublishTarget;
-  status: PublicationStatus;
+  status: PublicationLifecycleStatus;
   externalId: string | null;
   remoteUrl: string | null;
   filePath: string | null;
@@ -51,6 +53,7 @@ export type PostPublicationRecord = {
   error: string | null;
   createdAt: string;
   publishedAt: string | null;
+  unpublishedAt: string | null;
   updatedAt: string;
 };
 
@@ -142,6 +145,7 @@ const mapPublicationRow = (row: PostPublicationRow): PostPublicationRecord => ({
   error: row.error,
   createdAt: normalizeTimestamp(row.createdAt) ?? row.createdAt,
   publishedAt: normalizeTimestamp(row.publishedAt),
+  unpublishedAt: normalizeTimestamp(row.unpublishedAt),
   updatedAt: normalizeTimestamp(row.updatedAt) ?? row.updatedAt
 });
 
@@ -171,8 +175,17 @@ const getPublicationSummary = (
   publications: PostPublicationRecord[],
   post?: Pick<PostRow, 'source' | 'githubPath' | 'status'>
 ): PublicationSummary => {
-  const published = publications.filter((publication) => publication.status === 'published');
-  const failed = publications.filter((publication) => publication.status === 'failed');
+  const latestByTarget = new Map<PublishTarget, PostPublicationRecord>();
+
+  for (const publication of publications) {
+    if (!latestByTarget.has(publication.target)) {
+      latestByTarget.set(publication.target, publication);
+    }
+  }
+
+  const currentPublications = [...latestByTarget.values()];
+  const published = currentPublications.filter((publication) => publication.status === 'published');
+  const failed = currentPublications.filter((publication) => publication.status === 'failed');
   const latestPublished = [...published].sort((a, b) =>
     (b.publishedAt ?? '').localeCompare(a.publishedAt ?? '')
   )[0];
@@ -755,7 +768,7 @@ export const recordPostPublication = (
   slug: string,
   input: {
     target: PublishTarget;
-    status: PublicationStatus;
+    status: PublicationLifecycleStatus;
     externalId?: string | null;
     remoteUrl?: string | null;
     filePath?: string | null;
@@ -779,16 +792,36 @@ export const recordPostPublication = (
     filePath: input.filePath ?? null,
     commitSha: input.commitSha ?? null,
     artifactJson: input.artifact ? JSON.stringify(input.artifact) : null,
-    error: input.error ?? null
+    error: input.error ?? null,
+    unpublishedAt:
+      input.status === 'unpublished'
+        ? new Date().toISOString().slice(0, 19).replace('T', ' ')
+        : null
   });
 
   if (input.status === 'published') {
     if (isLivePublicationTarget(input.target)) {
       lockPublishedPostById(post.id);
     }
+  } else {
+    const refreshedPost = getPostBySlug(slug);
+
+    if (refreshedPost && refreshedPost.publicationSummary.livePublishedTargets.length === 0) {
+      unlockPublishedPostById(post.id);
+    }
   }
 
   return getPostBySlug(slug);
+};
+
+export const getLatestPublicationForTarget = (slug: string, target: PublishTarget) => {
+  const post = getPostBySlug(slug);
+
+  if (!post) {
+    return null;
+  }
+
+  return post.publications.find((publication) => publication.target === target) ?? null;
 };
 
 export const createEditableCopy = (slug: string) => {

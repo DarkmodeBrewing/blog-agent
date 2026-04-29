@@ -115,6 +115,7 @@ const ensureCompatibilitySchema = (database: Database.Database) => {
         error TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         published_at TEXT,
+        unpublished_at TEXT,
         updated_at TEXT NOT NULL DEFAULT (datetime('now')),
         FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
       );
@@ -152,6 +153,17 @@ const ensureCompatibilitySchema = (database: Database.Database) => {
   addPostColumn('content_type', "content_type TEXT NOT NULL DEFAULT 'blog'");
   addPostColumn('variant_role', "variant_role TEXT NOT NULL DEFAULT 'standalone'");
   addPostColumn('locked_at', 'locked_at TEXT');
+
+  const publicationColumns = database
+    .prepare(`PRAGMA table_info('post_publications')`)
+    .all() as Array<{
+    name: string;
+  }>;
+  const publicationColumnNames = new Set(publicationColumns.map((column) => column.name));
+
+  if (!publicationColumnNames.has('unpublished_at')) {
+    database.exec(`ALTER TABLE post_publications ADD COLUMN unpublished_at TEXT`);
+  }
 
   database.exec(`
       CREATE INDEX IF NOT EXISTS idx_posts_bundle_id ON posts(bundle_id);

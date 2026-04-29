@@ -305,25 +305,26 @@ Status: Completed
   - [x] `markdown_download` must not lock content
   - [x] `markdown_disk_export` is currently treated as export-only in the application state model
 - Extend publication records.
-  - add `unpublished` delivery state
-  - add `unpublished_at`
+  - [x] add `unpublished` delivery state
+  - [x] add `unpublished_at`
   - preserve prior publication history instead of overwriting it
-- Add adapter unpublish capability.
-  - common `unpublish(...)` contract
-  - capability flags such as `supportsUnpublish`
-- Implement GitHub unpublish behavior.
-  - configurable strategy:
-    - delete file
-    - mark frontmatter as draft
-    - future archive/move strategy if needed
+- [x] Add adapter unpublish capability.
+  - [x] common `unpublish(...)` contract
+  - [x] capability flags such as `supportsUnpublish`
+- [x] Implement initial GitHub unpublish behavior.
+  - [x] current strategy: delete file from repository
+  - [ ] configurable strategy:
+    - [ ] delete file
+    - [ ] mark frontmatter as draft
+    - [ ] future archive/move strategy if needed
 - Decide and implement disk-export unpublish semantics.
   - delete exported file
   - or move/archive file
 - [x] Recalculate lock/editability from active live publications only.
   - [x] no lock from download-only/export-only actions
-- Add unpublish APIs.
-  - unpublish by target
-  - optional `unpublish all and return to draft`
+- [x] Add unpublish APIs.
+  - [x] unpublish by target
+  - [x] optional `unpublish and return to draft`
 - Add delete API for local content.
   - allow delete only when no active live publications remain
   - block delete with clear error when active live publications still exist

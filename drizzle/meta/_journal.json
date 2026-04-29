@@ -15,6 +15,13 @@
       "when": 1776943941606,
       "tag": "0001_purple_sauron",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1777456120739,
+      "tag": "0002_cooing_red_wolf",
+      "breakpoints": true
     }
   ]
 }

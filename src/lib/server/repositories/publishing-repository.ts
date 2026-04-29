@@ -1,4 +1,9 @@
-import { insertPostPublication, lockPostById, selectPostRowBySlug } from './content-repository';
+import {
+  insertPostPublication,
+  lockPostById,
+  selectPostRowBySlug,
+  unlockPostById
+} from './content-repository';
 
 const toSqliteTimestamp = (date = new Date()) => date.toISOString().slice(0, 19).replace('T', ' ');
 
@@ -16,4 +21,8 @@ export const insertPublicationRecord = (values: Parameters<typeof insertPostPubl
 
 export const lockPublishedPostById = (postId: number) => {
   lockPostById(postId);
+};
+
+export const unlockPublishedPostById = (postId: number) => {
+  unlockPostById(postId);
 };

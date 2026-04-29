@@ -179,7 +179,9 @@ export const postPublications = sqliteTable(
         'social_linkedin'
       ]
     }).notNull(),
-    status: text('status', { enum: ['not_published', 'published', 'failed'] }).notNull(),
+    status: text('status', {
+      enum: ['not_published', 'published', 'unpublished', 'failed']
+    }).notNull(),
     externalId: text('external_id'),
     remoteUrl: text('remote_url'),
     filePath: text('file_path'),
@@ -190,6 +192,7 @@ export const postPublications = sqliteTable(
       .notNull()
       .default(sql`(datetime('now'))`),
     publishedAt: text('published_at'),
+    unpublishedAt: text('unpublished_at'),
     updatedAt: text('updated_at')
       .notNull()
       .default(sql`(datetime('now'))`)
