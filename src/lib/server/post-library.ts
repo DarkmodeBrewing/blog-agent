@@ -164,19 +164,29 @@ const mapPublicationRowsByPostId = (rows: PostRow[]) => {
   return publicationsByPostId;
 };
 
-const getPublicationSummary = (publications: PostPublicationRecord[]): PublicationSummary => {
+const getPublicationSummary = (
+  publications: PostPublicationRecord[],
+  post?: Pick<PostRow, 'source' | 'githubPath' | 'status'>
+): PublicationSummary => {
   const published = publications.filter((publication) => publication.status === 'published');
   const failed = publications.filter((publication) => publication.status === 'failed');
   const latestPublished = [...published].sort((a, b) =>
     (b.publishedAt ?? '').localeCompare(a.publishedAt ?? '')
   )[0];
+  const implicitGitHubPublished =
+    post?.source === 'github' && post.status === 'synced' && Boolean(post.githubPath);
+  const publishedTargets = [...new Set(published.map((publication) => publication.target))];
+
+  if (implicitGitHubPublished) {
+    publishedTargets.unshift('github_repo');
+  }
 
   return {
     total: publications.length,
-    publishedTargets: [...new Set(published.map((publication) => publication.target))],
+    publishedTargets: [...new Set(publishedTargets)],
     failedTargets: [...new Set(failed.map((publication) => publication.target))],
     latestPublishedAt: latestPublished?.publishedAt ?? null,
-    latestTarget: latestPublished?.target ?? null
+    latestTarget: latestPublished?.target ?? (implicitGitHubPublished ? 'github_repo' : null)
   };
 };
 
@@ -185,7 +195,7 @@ const mapPostRow = (
   publicationsByPostId?: Map<number, PostPublicationRecord[]>
 ): PostRecord => {
   const publications = publicationsByPostId?.get(row.id) ?? listPostPublications(row.id);
-  const publicationSummary = getPublicationSummary(publications);
+  const publicationSummary = getPublicationSummary(publications, row);
   const isPublished = publicationSummary.publishedTargets.length > 0;
   const isEditable = !row.lockedAt && !isPublished;
 

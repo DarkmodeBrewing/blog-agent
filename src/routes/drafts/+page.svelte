@@ -186,6 +186,22 @@
       .map((item) => item.trim())
       .filter(Boolean);
 
+  const getReferenceOpenLabel = (post: PostRecord) => {
+    switch (post.status) {
+      case 'synced':
+        return 'Open synced post';
+      case 'approved':
+        return 'Open approved post';
+      case 'rejected':
+        return 'Open rejected post';
+      case 'committed':
+        return 'Open committed post';
+      case 'draft':
+      default:
+        return 'Open draft';
+    }
+  };
+
   const loadPosts = async () => {
     loadingPosts = true;
     errorMessage = '';
@@ -911,7 +927,7 @@
                       type="button"
                       onclick={() => loadDraftIntoEditor(post)}
                     >
-                      Open draft
+                      {getReferenceOpenLabel(post)}
                     </button>
                   {:else if post.isPublished}
                     <button
