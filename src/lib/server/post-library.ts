@@ -14,7 +14,8 @@ import {
   selectPostRowBySlug,
   selectPostRows,
   selectPostRowsByBundleId,
-  deletePostById,
+  markPostDeletedById,
+  restoreDeletedPostById,
   upsertPostRow,
   type PostPublicationRow,
   type PostRow
@@ -85,12 +86,14 @@ export type PostRecord = {
   githubSha: string | null;
   source: PostSource;
   lockedAt: string | null;
+  deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
   publications: PostPublicationRecord[];
   publicationSummary: PublicationSummary;
   isPublished: boolean;
   isEditable: boolean;
+  isDeleted: boolean;
 };
 
 export type PostBundleRecord = {
@@ -100,7 +103,8 @@ export type PostBundleRecord = {
   posts: PostRecord[];
   contentTypes: PostContentType[];
   editorialStatuses: PostStatus[];
-  publishedTargets: PublishTarget[];
+  livePublishedTargets: PublishTarget[];
+  exportedTargets: PublishTarget[];
   updatedAt: string;
 };
 
@@ -120,6 +124,7 @@ type UpsertPostInput = {
   githubSha?: string | null;
   source: PostSource;
   lockedAt?: string | null;
+  deletedAt?: string | null;
   statusNotes?: string;
 };
 
@@ -238,12 +243,14 @@ const mapPostRow = (
     githubSha: row.githubSha,
     source: row.source,
     lockedAt: normalizeTimestamp(row.lockedAt),
+    deletedAt: normalizeTimestamp(row.deletedAt),
     createdAt: normalizeTimestamp(row.createdAt) ?? row.createdAt,
     updatedAt: normalizeTimestamp(row.updatedAt) ?? row.updatedAt,
     publications,
     publicationSummary,
     isPublished,
-    isEditable
+    isEditable,
+    isDeleted: Boolean(row.deletedAt)
   };
 };
 
@@ -266,18 +273,39 @@ const getStringArrayField = (data: Record<string, unknown>, key: string) => {
     : [];
 };
 
-export const listPosts = (status?: PostStatus) => {
-  return mapPostRows(selectPostRows(status));
+const getNextAvailableSlug = (baseSlug: string) => {
+  let nextSlug = baseSlug;
+  let counter = 2;
+
+  while (getPostBySlug(nextSlug, { includeDeleted: true })) {
+    nextSlug = `${baseSlug}-${counter}`;
+    counter += 1;
+  }
+
+  return nextSlug;
 };
 
-export const getPostBySlug = (slug: string) => {
-  const row = selectPostRowBySlug(slug);
+type PostListOptions = {
+  includeDeleted?: boolean;
+  onlyDeleted?: boolean;
+};
+
+export const listPosts = (status?: PostStatus, options?: PostListOptions) => {
+  return mapPostRows(selectPostRows(status, options));
+};
+
+export const getPostBySlug = (slug: string, options?: PostListOptions) => {
+  const row = selectPostRowBySlug(slug, options);
 
   return row ? mapPostRow(row) : null;
 };
 
-export const getPostsByBundleId = (bundleId: number, excludeSlug?: string) => {
-  const rows = selectPostRowsByBundleId(bundleId);
+export const getPostsByBundleId = (
+  bundleId: number,
+  excludeSlug?: string,
+  options?: PostListOptions
+) => {
+  const rows = selectPostRowsByBundleId(bundleId, options);
 
   return mapPostRows(rows).filter((post) => (excludeSlug ? post.slug !== excludeSlug : true));
 };
@@ -357,8 +385,11 @@ const mapBundlePosts = (bundlePosts: PostRecord[]): PostBundleRecord => {
     posts: sorted,
     contentTypes: [...new Set(sorted.map((post) => post.contentType))],
     editorialStatuses: [...new Set(sorted.map((post) => post.status))],
-    publishedTargets: [
-      ...new Set(sorted.flatMap((post) => post.publicationSummary.publishedTargets))
+    livePublishedTargets: [
+      ...new Set(sorted.flatMap((post) => post.publicationSummary.livePublishedTargets))
+    ],
+    exportedTargets: [
+      ...new Set(sorted.flatMap((post) => post.publicationSummary.exportedTargets))
     ],
     updatedAt: sorted.reduce(
       (latest, post) => (post.updatedAt > latest ? post.updatedAt : latest),
@@ -367,10 +398,10 @@ const mapBundlePosts = (bundlePosts: PostRecord[]): PostBundleRecord => {
   };
 };
 
-export const listPostBundles = (status?: PostStatus) => {
+export const listPostBundles = (status?: PostStatus, options?: PostListOptions) => {
   const grouped = new Map<string, PostRecord[]>();
 
-  for (const post of listPosts(status)) {
+  for (const post of listPosts(status, options)) {
     const key = toBundleKey(post);
     const existing = grouped.get(key);
 
@@ -402,7 +433,7 @@ export const createContentBundle = () => {
 };
 
 export const upsertPost = (input: UpsertPostInput) => {
-  const existing = getPostBySlug(input.slug);
+  const existing = getPostBySlug(input.slug, { includeDeleted: true });
 
   const values = {
     bundleId: input.bundleId ?? existing?.bundleId ?? null,
@@ -419,7 +450,8 @@ export const upsertPost = (input: UpsertPostInput) => {
     githubPath: input.githubPath ?? null,
     githubSha: input.githubSha ?? null,
     source: input.source,
-    lockedAt: input.lockedAt ?? existing?.lockedAt ?? null
+    lockedAt: input.lockedAt ?? existing?.lockedAt ?? null,
+    deletedAt: input.deletedAt ?? existing?.deletedAt ?? null
   };
 
   const result = upsertPostRow(values);
@@ -452,9 +484,10 @@ export const createDraftFromGeneration = (
   prompt: string
 ) => {
   const bundleId = createContentBundle();
+  const slug = getNextAvailableSlug(draft.slug);
   const { post } = upsertPost({
     bundleId,
-    slug: draft.slug,
+    slug,
     title: draft.title,
     ingress: draft.ingress ?? null,
     body: draft.body,
@@ -521,13 +554,7 @@ export const createVariantDraftFromGeneration = (
   }
 
   const slugBase = `${parent.slug}-${input.variant.platform}`;
-  let slug = slugBase;
-  let counter = 2;
-
-  while (getPostBySlug(slug)) {
-    slug = `${slugBase}-${counter}`;
-    counter += 1;
-  }
+  const slug = getNextAvailableSlug(slugBase);
 
   const titleSuffix = input.variant.platform === 'x' ? 'X Post' : 'LinkedIn Post';
   const { post } = upsertPost({
@@ -825,6 +852,12 @@ export const getLatestPublicationForTarget = (slug: string, target: PublishTarge
   return post.publications.find((publication) => publication.target === target) ?? null;
 };
 
+export const getDeletedPostBySlug = (slug: string) => {
+  const post = getPostBySlug(slug, { includeDeleted: true });
+
+  return post?.isDeleted ? post : null;
+};
+
 export const createEditableCopy = (slug: string) => {
   const post = getPostBySlug(slug);
 
@@ -833,13 +866,7 @@ export const createEditableCopy = (slug: string) => {
   }
 
   const copySlugBase = `${post.slug}-copy`;
-  let nextSlug = copySlugBase;
-  let counter = 2;
-
-  while (getPostBySlug(nextSlug)) {
-    nextSlug = `${copySlugBase}-${counter}`;
-    counter += 1;
-  }
+  const nextSlug = getNextAvailableSlug(copySlugBase);
 
   const copy = upsertPost({
     bundleId: post.bundleId,
@@ -887,7 +914,7 @@ export const deletePost = (slug: string) => {
     throw new Error(`Only draft or rejected posts can be deleted. Current status: ${post.status}`);
   }
 
-  deletePostById(post.id);
+  markPostDeletedById(post.id);
 
   logWorkflow({
     level: 'info',
@@ -897,7 +924,8 @@ export const deletePost = (slug: string) => {
       postId: post.id,
       status: post.status,
       source: post.source,
-      contentType: post.contentType
+      contentType: post.contentType,
+      softDeleted: true
     }
   });
 
@@ -905,4 +933,34 @@ export const deletePost = (slug: string) => {
     slug,
     deleted: true
   };
+};
+
+export const restoreDeletedPost = (slug: string) => {
+  const post = getDeletedPostBySlug(slug);
+
+  if (!post) {
+    return null;
+  }
+
+  restoreDeletedPostById(post.id);
+
+  const restored = getPostBySlug(slug);
+
+  if (!restored) {
+    throw new Error(`Failed to restore deleted post: ${slug}`);
+  }
+
+  logWorkflow({
+    level: 'info',
+    message: 'post.restored',
+    details: {
+      slug,
+      postId: restored.id,
+      status: restored.status,
+      source: restored.source,
+      contentType: restored.contentType
+    }
+  });
+
+  return restored;
 };

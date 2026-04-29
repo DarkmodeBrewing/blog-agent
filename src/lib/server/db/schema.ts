@@ -65,6 +65,7 @@ export const posts = sqliteTable(
     githubSha: text('github_sha'),
     source: text('source', { enum: ['github', 'generated', 'manual'] }).notNull(),
     lockedAt: text('locked_at'),
+    deletedAt: text('deleted_at'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`(datetime('now'))`),

@@ -296,7 +296,7 @@ Status: Completed
 
 ## Phase 13: Publication Lifecycle and Deletion Workflow
 
-- Status: In progress
+- Status: Completed
 
 - [x] Reclassify publish targets into:
   - export targets
@@ -317,9 +317,13 @@ Status: Completed
     - [x] delete file
     - [x] mark frontmatter as draft
     - [ ] future archive/move strategy if needed
-- Decide and implement disk-export unpublish semantics.
-  - [x] delete exported file
-  - [ ] move/archive file
+- [x] Reclassify disk export as export-only history.
+  - [x] do not treat disk export as live publication state
+  - [x] remove disk export from unpublish workflow
+- Soft delete and restore workflow.
+  - [x] replace hard delete with soft delete
+  - [x] exclude deleted posts from default listings and detail routes
+  - [x] add deleted-posts restore UI
 - [x] Recalculate lock/editability from active live publications only.
   - [x] no lock from download-only/export-only actions
 - [x] Add unpublish APIs.
@@ -333,6 +337,9 @@ Status: Completed
   - [x] show `Unpublish` per target where supported
   - [x] show `Delete post` only when allowed
   - [x] improve lock reason messaging
+- [x] Add publication history UI.
+  - [x] post detail
+  - [x] draft editor
 - Add migration handling for existing publication rows.
   - [x] classify old export rows correctly
   - [x] avoid treating historical downloads as live publication

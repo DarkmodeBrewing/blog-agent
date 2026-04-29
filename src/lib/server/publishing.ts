@@ -1,5 +1,5 @@
 import matter from 'gray-matter';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import prettier from 'prettier';
 import {
@@ -66,7 +66,7 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     requiresConfiguration: true,
     kind: 'export',
     channel: 'markdown',
-    supportsUnpublish: true
+    supportsUnpublish: false
   },
   {
     id: 'github_repo',
@@ -609,59 +609,6 @@ const unpublishGitHubRepo = async (
   };
 };
 
-const unpublishMarkdownDiskExport = async (
-  post: PostRecord,
-  options?: { actionId?: string | null; requestId?: string | null; returnToDraft?: boolean }
-) => {
-  const latestPublication = getLatestPublicationForTarget(post.slug, 'markdown_disk_export');
-
-  if (!latestPublication || latestPublication.status !== 'published') {
-    throw new Error('Post is not currently exported to disk');
-  }
-
-  const filePath = latestPublication.filePath;
-
-  if (!filePath) {
-    throw new Error('Disk export file path is missing for the latest publication record');
-  }
-
-  const fileExisted = existsSync(filePath);
-  if (fileExisted) {
-    rmSync(filePath);
-  }
-
-  const unpublishedPost = recordPostPublication(post.slug, {
-    target: 'markdown_disk_export',
-    status: 'unpublished',
-    filePath,
-    artifact: latestPublication.artifact
-  });
-
-  if (!unpublishedPost) {
-    throw new Error(`Post not found while recording unpublish: ${post.slug}`);
-  }
-
-  logWorkflow({
-    level: 'info',
-    message: 'post.unpublish.completed',
-    context: {
-      actionId: options?.actionId ?? null,
-      requestId: options?.requestId ?? null,
-      slug: unpublishedPost.slug,
-      target: 'markdown_disk_export'
-    },
-    details: {
-      filePath,
-      fileExisted
-    }
-  });
-
-  return {
-    post: unpublishedPost,
-    filePath
-  };
-};
-
 export const unpublishPost = async (
   slug: string,
   target: PublishTarget,
@@ -703,8 +650,6 @@ export const unpublishPost = async (
   });
 
   switch (target) {
-    case 'markdown_disk_export':
-      return unpublishMarkdownDiskExport(post, options);
     case 'github_repo':
       return unpublishGitHubRepo(post, options);
     default:

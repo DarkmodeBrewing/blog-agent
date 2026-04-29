@@ -292,6 +292,7 @@ const ensureCompatibilitySchema = (database: Database.Database) => {
   addPostColumn('content_type', "content_type TEXT NOT NULL DEFAULT 'blog'");
   addPostColumn('variant_role', "variant_role TEXT NOT NULL DEFAULT 'standalone'");
   addPostColumn('locked_at', 'locked_at TEXT');
+  addPostColumn('deleted_at', 'deleted_at TEXT');
 
   const publicationColumns = database
     .prepare(`PRAGMA table_info('post_publications')`)

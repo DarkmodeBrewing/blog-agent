@@ -20,10 +20,13 @@
     source: 'github' | 'generated' | 'manual';
     githubPath: string | null;
     lockedAt: string | null;
+    deletedAt?: string | null;
     updatedAt: string;
     publicationSummary: {
       total: number;
       publishedTargets: string[];
+      livePublishedTargets: string[];
+      exportedTargets: string[];
       failedTargets: string[];
       latestPublishedAt: string | null;
       latestTarget: string | null;
@@ -39,7 +42,8 @@
     posts: PostRecord[];
     contentTypes: Array<PostRecord['contentType']>;
     editorialStatuses: PostStatus[];
-    publishedTargets: string[];
+    livePublishedTargets: string[];
+    exportedTargets: string[];
     updatedAt: string;
   };
 
@@ -173,6 +177,12 @@
         >
           {syncing ? 'Syncing...' : 'Sync GitHub'}
         </button>
+        <a
+          class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
+          href={resolve('/posts/deleted')}
+        >
+          Deleted posts
+        </a>
       </div>
     </div>
 
@@ -243,11 +253,11 @@
                   </div>
                 </td>
                 <td class="px-4 py-3">
-                  {#if bundle.publishedTargets.length === 0}
+                  {#if bundle.livePublishedTargets.length === 0}
                     <span class="text-slate-500">None</span>
                   {:else}
                     <div class="flex flex-wrap gap-1.5">
-                      {#each bundle.publishedTargets as target (target)}
+                      {#each bundle.livePublishedTargets as target (target)}
                         <span class="rounded bg-emerald-50 px-2 py-1 text-xs text-emerald-800">
                           {target}
                         </span>

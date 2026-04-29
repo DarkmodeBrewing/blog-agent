@@ -20,7 +20,20 @@
     source: 'github' | 'generated' | 'manual';
     githubPath: string | null;
     lockedAt: string | null;
+    deletedAt: string | null;
     updatedAt: string;
+    publications: Array<{
+      id: number;
+      target: string;
+      status: 'not_published' | 'published' | 'unpublished' | 'failed';
+      remoteUrl: string | null;
+      filePath: string | null;
+      commitSha: string | null;
+      error: string | null;
+      publishedAt: string | null;
+      unpublishedAt: string | null;
+      updatedAt: string;
+    }>;
     publicationSummary: {
       total: number;
       publishedTargets: string[];
@@ -71,15 +84,9 @@
     )
   );
 
-  const canUnpublishTarget = (target: string) =>
-    target === 'github_repo' || target === 'markdown_disk_export';
+  const canUnpublishTarget = (target: string) => target === 'github_repo';
 
-  const getTargetLabel = (target: string) =>
-    target === 'github_repo'
-      ? 'GitHub'
-      : target === 'markdown_disk_export'
-        ? 'Disk export'
-        : target;
+  const getTargetLabel = (target: string) => (target === 'github_repo' ? 'GitHub' : target);
 
   const loadPost = async () => {
     const routeSlug = page.params.slug;
@@ -135,7 +142,7 @@
 
   const deleteCurrentPost = async () => {
     if (!currentPost) return;
-    if (!confirm(`Delete "${currentPost.title}"? This cannot be undone.`)) return;
+    if (!confirm(`Move "${currentPost.title}" to deleted posts?`)) return;
 
     mutating = true;
     statusMessage = '';
@@ -223,7 +230,7 @@
             type="button"
             onclick={() => void deleteCurrentPost()}
           >
-            Delete post
+            Move to deleted
           </button>
         {/if}
       </div>
@@ -323,13 +330,59 @@
 
         {#if currentPost.publicationSummary.publishedTargets.length > 0}
           <section class="space-y-2">
-            <h3 class="text-sm font-semibold text-slate-950">Published targets</h3>
+            <h3 class="text-sm font-semibold text-slate-950">Current target state</h3>
             <div class="flex flex-wrap gap-2">
-              {#each currentPost.publicationSummary.publishedTargets as target (target)}
+              {#each currentPost.publicationSummary.livePublishedTargets as target (target)}
                 <span class="rounded bg-emerald-50 px-2 py-1 text-xs text-emerald-800">
-                  {target}
+                  Live: {target}
                 </span>
               {/each}
+              {#each currentPost.publicationSummary.exportedTargets as target (target)}
+                <span class="rounded bg-cyan-50 px-2 py-1 text-xs text-cyan-800">
+                  Exported: {target}
+                </span>
+              {/each}
+            </div>
+          </section>
+        {/if}
+
+        {#if currentPost.publications.length > 0}
+          <section class="space-y-2">
+            <h3 class="text-sm font-semibold text-slate-950">Publication history</h3>
+            <div class="overflow-x-auto">
+              <table class="w-full min-w-[42rem] text-left text-sm">
+                <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+                  <tr>
+                    <th class="px-3 py-2" scope="col">Target</th>
+                    <th class="px-3 py-2" scope="col">Status</th>
+                    <th class="px-3 py-2" scope="col">Published</th>
+                    <th class="px-3 py-2" scope="col">Unpublished</th>
+                    <th class="px-3 py-2" scope="col">Reference</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each currentPost.publications as publication (publication.id)}
+                    <tr class="border-t border-slate-100">
+                      <td class="px-3 py-2 text-slate-700">{publication.target}</td>
+                      <td class="px-3 py-2 text-slate-700">{publication.status}</td>
+                      <td class="px-3 py-2 text-slate-700">
+                        {publication.publishedAt ? formatTimestamp(publication.publishedAt) : '—'}
+                      </td>
+                      <td class="px-3 py-2 text-slate-700">
+                        {publication.unpublishedAt
+                          ? formatTimestamp(publication.unpublishedAt)
+                          : '—'}
+                      </td>
+                      <td class="px-3 py-2 text-slate-700">
+                        {publication.remoteUrl ??
+                          publication.filePath ??
+                          publication.commitSha ??
+                          '—'}
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
             </div>
           </section>
         {/if}

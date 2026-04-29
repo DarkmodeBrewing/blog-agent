@@ -7,16 +7,21 @@ const postStatuses = new Set<PostStatus>(['synced', 'draft', 'approved', 'commit
 export const GET: RequestHandler = ({ url }) => {
   const status = url.searchParams.get('status');
   const grouped = url.searchParams.get('grouped');
+  const deleted = url.searchParams.get('deleted');
 
   if (status && !postStatuses.has(status as PostStatus)) {
     return json({ error: 'Invalid post status' }, { status: 400 });
   }
 
   const resolvedStatus = status ? (status as PostStatus) : undefined;
+  const onlyDeleted = deleted === '1' || deleted === 'true';
 
   return json({
-    posts: listPosts(resolvedStatus),
-    bundles: listPostBundles(resolvedStatus),
-    grouped: grouped === '1' || grouped === 'true' ? listPostBundles(resolvedStatus) : undefined
+    posts: listPosts(resolvedStatus, onlyDeleted ? { onlyDeleted: true } : undefined),
+    bundles: listPostBundles(resolvedStatus, onlyDeleted ? { onlyDeleted: true } : undefined),
+    grouped:
+      grouped === '1' || grouped === 'true'
+        ? listPostBundles(resolvedStatus, onlyDeleted ? { onlyDeleted: true } : undefined)
+        : undefined
   });
 };
