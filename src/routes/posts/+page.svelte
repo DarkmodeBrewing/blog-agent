@@ -105,10 +105,16 @@
     statusMessage = '';
     errorMessage = '';
     try {
-      const data = await requestJson<{ synced: number }>(apiUrl('/api/posts/sync'), {
-        method: 'POST'
-      });
-      statusMessage = `Synced ${data.synced} posts`;
+      const data = await requestJson<{ synced: number; softDeleted?: number }>(
+        apiUrl('/api/posts/sync'),
+        {
+          method: 'POST'
+        }
+      );
+      statusMessage =
+        data.softDeleted && data.softDeleted > 0
+          ? `Synced ${data.synced} posts and soft-deleted ${data.softDeleted} removed GitHub posts`
+          : `Synced ${data.synced} posts`;
       await loadPosts();
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : 'Sync failed';

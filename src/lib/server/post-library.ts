@@ -26,7 +26,11 @@ import {
   unlockPublishedPostById
 } from './repositories/publishing-repository';
 import { isLivePublicationTarget } from './publication-targets';
-import { selectSyncedPostRowBySlug } from './repositories/sync-repository';
+import {
+  selectGitHubSourcedPostRows,
+  selectSyncedPostRowBySlug,
+  softDeleteSyncedPostById
+} from './repositories/sync-repository';
 
 export type PostStatus = 'synced' | 'draft' | 'approved' | 'committed' | 'rejected';
 export type PostSource = 'github' | 'generated' | 'manual';
@@ -712,9 +716,14 @@ export const syncPostsFromGitHub = async () => {
   });
 
   const files = await getGitHubBlogPostFiles();
+  const currentPaths = new Set(files.map((file) => file.path));
+  const syncedSourcePosts = selectGitHubSourcedPostRows({ includeDeleted: true }).filter((post) =>
+    post.githubPath?.startsWith(`${config.blogPostPath}/`)
+  );
   let synced = 0;
   let inserted = 0;
   let updated = 0;
+  let softDeleted = 0;
 
   for (const file of files) {
     const parsed = matter(file.content);
@@ -751,6 +760,7 @@ export const syncPostsFromGitHub = async () => {
       githubPath: file.path,
       githubSha: file.sha,
       source: 'github',
+      deletedAt: null,
       statusNotes: 'Synced from GitHub'
     });
 
@@ -775,6 +785,26 @@ export const syncPostsFromGitHub = async () => {
     synced += 1;
   }
 
+  for (const post of syncedSourcePosts) {
+    if (!post.githubPath || currentPaths.has(post.githubPath) || post.deletedAt) {
+      continue;
+    }
+
+    softDeleteSyncedPostById(post.id);
+    softDeleted += 1;
+
+    logWorkflow({
+      level: 'info',
+      message: 'sync.post.soft_deleted',
+      details: {
+        slug: post.slug,
+        path: post.githubPath,
+        source: 'github',
+        reason: 'missing_from_repo'
+      }
+    });
+  }
+
   logWorkflow({
     level: 'info',
     message: 'sync.completed',
@@ -783,12 +813,14 @@ export const syncPostsFromGitHub = async () => {
       synced,
       inserted,
       updated,
+      softDeleted,
       skipped: files.length - synced
     }
   });
 
   return {
-    synced
+    synced,
+    softDeleted
   };
 };
 
