@@ -334,8 +334,8 @@ Status: Completed
   - [x] show `Delete post` only when allowed
   - [x] improve lock reason messaging
 - Add migration handling for existing publication rows.
-  - classify old export rows correctly
-  - avoid treating historical downloads as live publication
+  - [x] classify old export rows correctly
+  - [x] avoid treating historical downloads as live publication
 
 ## Suggested Execution Order
 
