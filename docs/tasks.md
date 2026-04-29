@@ -325,13 +325,13 @@ Status: Completed
 - [x] Add unpublish APIs.
   - [x] unpublish by target
   - [x] optional `unpublish and return to draft`
-- Add delete API for local content.
-  - allow delete only when no active live publications remain
-  - block delete with clear error when active live publications still exist
+- [x] Add delete API for local content.
+  - [x] allow delete only when no active live publications remain
+  - [x] block delete with clear error when active live publications still exist
 - Refactor UI for publication lifecycle.
-  - show active published targets clearly
-  - show `Unpublish` per target where supported
-  - show `Delete post` only when allowed
+  - [x] show active published targets clearly
+  - [x] show `Unpublish` per target where supported
+  - [x] show `Delete post` only when allowed
   - improve lock reason messaging
 - Add migration handling for existing publication rows.
   - classify old export rows correctly

@@ -23,6 +23,8 @@
     publicationSummary: {
       total: number;
       publishedTargets: string[];
+      livePublishedTargets: string[];
+      exportedTargets: string[];
       failedTargets: string[];
       latestPublishedAt: string | null;
       latestTarget: string | null;
@@ -173,6 +175,13 @@
   let editorPost = $derived(posts.find((post) => post.slug === editorSlug) ?? null);
   let hasDraft = $derived(Boolean(editorSlug));
   let editorLocked = $derived(Boolean(editorPost && !editorPost.isEditable));
+  let canDeleteEditorPost = $derived(
+    Boolean(
+      editorPost &&
+      editorPost.publicationSummary.livePublishedTargets.length === 0 &&
+      (editorPost.status === 'draft' || editorPost.status === 'rejected')
+    )
+  );
   let generationBlocked = $derived(appReadiness ? !appReadiness.readyForGeneration : false);
   let controlsDisabled = $derived(generating || saving || publishing || generationBlocked);
 
@@ -185,6 +194,8 @@
       .split(',')
       .map((item) => item.trim())
       .filter(Boolean);
+
+  const canUnpublishTarget = (target: string) => target === 'github_repo';
 
   const getReferenceOpenLabel = (post: PostRecord) => {
     switch (post.status) {
@@ -635,6 +646,67 @@
     }
   };
 
+  const unpublishEditorPost = async (target: string, returnToDraft = false) => {
+    if (!editorSlug) return;
+
+    publishing = true;
+    statusMessage = '';
+    errorMessage = '';
+
+    try {
+      await requestJson<{ result: { post: PostRecord } }>(
+        apiUrl(
+          `/api/posts/${encodeURIComponent(editorSlug)}/unpublish/${encodeURIComponent(target)}`
+        ),
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ returnToDraft })
+        }
+      );
+
+      statusMessage = returnToDraft
+        ? `${editorSlug} unpublished from ${target} and returned to draft`
+        : `${editorSlug} unpublished from ${target}`;
+      await loadPosts();
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Failed to unpublish post';
+    } finally {
+      publishing = false;
+    }
+  };
+
+  const deleteEditorPost = async () => {
+    if (!editorSlug || !editorPost) return;
+    if (!confirm(`Delete "${editorPost.title}"? This cannot be undone.`)) return;
+
+    publishing = true;
+    statusMessage = '';
+    errorMessage = '';
+
+    try {
+      await requestJson<{ deleted: boolean }>(
+        apiUrl(`/api/posts/${encodeURIComponent(editorSlug)}`),
+        {
+          method: 'DELETE'
+        }
+      );
+      statusMessage = `${editorSlug} deleted`;
+      editorSlug = '';
+      editorTitle = '';
+      editorIngress = '';
+      editorTags = '';
+      editorBody = '';
+      editorBundlePosts = [];
+      editorRelatedPosts = [];
+      await loadPosts();
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Failed to delete post';
+    } finally {
+      publishing = false;
+    }
+  };
+
   onMount(() => {
     void (async () => {
       await loadPosts();
@@ -1072,6 +1144,40 @@
           >
             {publishing ? 'Publishing...' : 'Publish'}
           </button>
+          {#if editorPost?.publicationSummary.livePublishedTargets.length}
+            {#each editorPost.publicationSummary.livePublishedTargets as target (target)}
+              {#if canUnpublishTarget(target)}
+                <button
+                  class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+                  disabled={!hasDraft || controlsDisabled}
+                  type="button"
+                  onclick={() => void unpublishEditorPost(target)}
+                >
+                  Unpublish {target}
+                </button>
+              {/if}
+            {/each}
+            {#if editorPost.publicationSummary.livePublishedTargets.includes('github_repo')}
+              <button
+                class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+                disabled={!hasDraft || controlsDisabled}
+                type="button"
+                onclick={() => void unpublishEditorPost('github_repo', true)}
+              >
+                Unpublish and return to draft
+              </button>
+            {/if}
+          {/if}
+          {#if canDeleteEditorPost}
+            <button
+              class="rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-700 disabled:opacity-50"
+              disabled={!hasDraft || controlsDisabled}
+              type="button"
+              onclick={() => void deleteEditorPost()}
+            >
+              Delete post
+            </button>
+          {/if}
           {#if editorLocked}
             <button
               class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"

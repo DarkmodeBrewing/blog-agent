@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { z } from 'zod/v4';
 import { BlogSlugSchema } from '../../../../openai/model';
 import {
+  deletePost,
   getPostBundleBySlug,
   getPostBySlug,
   getRelatedPosts,
@@ -75,4 +76,40 @@ export const PUT: RequestHandler = async ({ params, request }) => {
   }
 
   return json({ post });
+};
+
+export const DELETE: RequestHandler = ({ params }) => {
+  const parsedSlug = BlogSlugSchema.safeParse(params.slug);
+
+  if (!parsedSlug.success) {
+    return json({ error: 'Invalid slug', issues: parsedSlug.error.issues }, { status: 400 });
+  }
+
+  try {
+    const result = deletePost(parsedSlug.data);
+
+    if (!result) {
+      return json({ error: 'Post not found' }, { status: 404 });
+    }
+
+    return json(result);
+  } catch (cause) {
+    logWorkflow({
+      level: 'error',
+      message: 'api.request.failed',
+      details: {
+        route: '/api/posts/[slug]',
+        method: 'DELETE',
+        slug: parsedSlug.data,
+        error: getErrorMessage(cause)
+      }
+    });
+
+    return json(
+      {
+        error: cause instanceof Error ? cause.message : 'Failed to delete post'
+      },
+      { status: 400 }
+    );
+  }
 };

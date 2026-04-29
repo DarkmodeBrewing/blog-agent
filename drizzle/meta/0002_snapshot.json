@@ -73,16 +73,12 @@
       "indexes": {
         "content_bundles_key_unique": {
           "name": "content_bundles_key_unique",
-          "columns": [
-            "key"
-          ],
+          "columns": ["key"],
           "isUnique": true
         },
         "idx_content_bundles_key": {
           "name": "idx_content_bundles_key",
-          "columns": [
-            "key"
-          ],
+          "columns": ["key"],
           "isUnique": false
         }
       },
@@ -163,16 +159,12 @@
       "indexes": {
         "idx_generation_jobs_status": {
           "name": "idx_generation_jobs_status",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         },
         "idx_generation_jobs_created_at": {
           "name": "idx_generation_jobs_created_at",
-          "columns": [
-            "created_at"
-          ],
+          "columns": ["created_at"],
           "isUnique": false
         }
       },
@@ -246,9 +238,7 @@
       "indexes": {
         "idx_generation_runs_post_id": {
           "name": "idx_generation_runs_post_id",
-          "columns": [
-            "post_id"
-          ],
+          "columns": ["post_id"],
           "isUnique": false
         }
       },
@@ -257,12 +247,8 @@
           "name": "generation_runs_post_id_posts_id_fk",
           "tableFrom": "generation_runs",
           "tableTo": "posts",
-          "columnsFrom": [
-            "post_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["post_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -424,23 +410,17 @@
       "indexes": {
         "idx_post_publications_post_id": {
           "name": "idx_post_publications_post_id",
-          "columns": [
-            "post_id"
-          ],
+          "columns": ["post_id"],
           "isUnique": false
         },
         "idx_post_publications_target": {
           "name": "idx_post_publications_target",
-          "columns": [
-            "target"
-          ],
+          "columns": ["target"],
           "isUnique": false
         },
         "idx_post_publications_status": {
           "name": "idx_post_publications_status",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         }
       },
@@ -449,12 +429,8 @@
           "name": "post_publications_post_id_posts_id_fk",
           "tableFrom": "post_publications",
           "tableTo": "posts",
-          "columnsFrom": [
-            "post_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["post_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -513,9 +489,7 @@
       "indexes": {
         "idx_post_status_events_post_id": {
           "name": "idx_post_status_events_post_id",
-          "columns": [
-            "post_id"
-          ],
+          "columns": ["post_id"],
           "isUnique": false
         }
       },
@@ -524,12 +498,8 @@
           "name": "post_status_events_post_id_posts_id_fk",
           "tableFrom": "post_status_events",
           "tableTo": "posts",
-          "columnsFrom": [
-            "post_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["post_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -677,44 +647,32 @@
       "indexes": {
         "posts_slug_unique": {
           "name": "posts_slug_unique",
-          "columns": [
-            "slug"
-          ],
+          "columns": ["slug"],
           "isUnique": true
         },
         "idx_posts_bundle_id": {
           "name": "idx_posts_bundle_id",
-          "columns": [
-            "bundle_id"
-          ],
+          "columns": ["bundle_id"],
           "isUnique": false
         },
         "idx_posts_parent_post_id": {
           "name": "idx_posts_parent_post_id",
-          "columns": [
-            "parent_post_id"
-          ],
+          "columns": ["parent_post_id"],
           "isUnique": false
         },
         "idx_posts_content_type": {
           "name": "idx_posts_content_type",
-          "columns": [
-            "content_type"
-          ],
+          "columns": ["content_type"],
           "isUnique": false
         },
         "idx_posts_status": {
           "name": "idx_posts_status",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         },
         "idx_posts_source": {
           "name": "idx_posts_source",
-          "columns": [
-            "source"
-          ],
+          "columns": ["source"],
           "isUnique": false
         }
       },
@@ -723,12 +681,8 @@
           "name": "posts_bundle_id_content_bundles_id_fk",
           "tableFrom": "posts",
           "tableTo": "content_bundles",
-          "columnsFrom": [
-            "bundle_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["bundle_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -736,12 +690,8 @@
           "name": "posts_parent_post_id_posts_id_fk",
           "tableFrom": "posts",
           "tableTo": "posts",
-          "columnsFrom": [
-            "parent_post_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["parent_post_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -839,23 +789,17 @@
       "indexes": {
         "idx_token_usage_events_created_at": {
           "name": "idx_token_usage_events_created_at",
-          "columns": [
-            "created_at"
-          ],
+          "columns": ["created_at"],
           "isUnique": false
         },
         "idx_token_usage_events_model": {
           "name": "idx_token_usage_events_model",
-          "columns": [
-            "model"
-          ],
+          "columns": ["model"],
           "isUnique": false
         },
         "idx_token_usage_events_session_id": {
           "name": "idx_token_usage_events_session_id",
-          "columns": [
-            "session_id"
-          ],
+          "columns": ["session_id"],
           "isUnique": false
         }
       },

@@ -140,3 +140,7 @@ export const unlockPostById = (postId: number) => {
     .where(eq(posts.id, postId))
     .run();
 };
+
+export const deletePostById = (postId: number) => {
+  getDatabase().delete(posts).where(eq(posts.id, postId)).run();
+};

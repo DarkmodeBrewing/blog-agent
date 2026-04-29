@@ -14,6 +14,7 @@ import {
   selectPostRowBySlug,
   selectPostRows,
   selectPostRowsByBundleId,
+  deletePostById,
   upsertPostRow,
   type PostPublicationRow,
   type PostRow
@@ -869,4 +870,39 @@ export const createEditableCopy = (slug: string) => {
   });
 
   return copy;
+};
+
+export const deletePost = (slug: string) => {
+  const post = getPostBySlug(slug);
+
+  if (!post) {
+    return null;
+  }
+
+  if (post.publicationSummary.livePublishedTargets.length > 0) {
+    throw new Error('Published posts must be unpublished before they can be deleted.');
+  }
+
+  if (!['draft', 'rejected'].includes(post.status)) {
+    throw new Error(`Only draft or rejected posts can be deleted. Current status: ${post.status}`);
+  }
+
+  deletePostById(post.id);
+
+  logWorkflow({
+    level: 'info',
+    message: 'post.deleted',
+    details: {
+      slug,
+      postId: post.id,
+      status: post.status,
+      source: post.source,
+      contentType: post.contentType
+    }
+  });
+
+  return {
+    slug,
+    deleted: true
+  };
 };
