@@ -16,6 +16,7 @@ This document breaks the requested changes into implementation phases in the ord
 - [x] Phase 10: Accessibility, usability, and responsive pass
 - [x] Phase 11: Logging and observability adjustments
 - [x] Phase 12: Cleanup and documentation
+- [ ] Phase 13: Publication lifecycle and deletion workflow
 
 ## Phase 0: Decisions and Constraints
 
@@ -293,6 +294,46 @@ Status: Completed
   - [x] generation workflow
 - [x] Add migration notes for existing local databases.
 
+## Phase 13: Publication Lifecycle and Deletion Workflow
+
+- Reclassify publish targets into:
+  - export targets
+  - live publication targets
+- Stop treating export targets as live publication state.
+  - `markdown_download` must not lock content
+  - `markdown_disk_export` should be evaluated explicitly as export-only or managed publication
+- Extend publication records.
+  - add `unpublished` delivery state
+  - add `unpublished_at`
+  - preserve prior publication history instead of overwriting it
+- Add adapter unpublish capability.
+  - common `unpublish(...)` contract
+  - capability flags such as `supportsUnpublish`
+- Implement GitHub unpublish behavior.
+  - configurable strategy:
+    - delete file
+    - mark frontmatter as draft
+    - future archive/move strategy if needed
+- Decide and implement disk-export unpublish semantics.
+  - delete exported file
+  - or move/archive file
+- Recalculate lock/editability from active live publications only.
+  - no lock from download-only/export-only actions
+- Add unpublish APIs.
+  - unpublish by target
+  - optional `unpublish all and return to draft`
+- Add delete API for local content.
+  - allow delete only when no active live publications remain
+  - block delete with clear error when active live publications still exist
+- Refactor UI for publication lifecycle.
+  - show active published targets clearly
+  - show `Unpublish` per target where supported
+  - show `Delete post` only when allowed
+  - improve lock reason messaging
+- Add migration handling for existing publication rows.
+  - classify old export rows correctly
+  - avoid treating historical downloads as live publication
+
 ## Suggested Execution Order
 
 1. Decide bootstrap/auth approach and target scope.
@@ -305,6 +346,7 @@ Status: Completed
 8. Refactor home, generate, posts list, and post detail routes.
 9. Make accessibility and responsive pass.
 10. Remove old routes/code and finalize docs.
+11. Add publication lifecycle, unpublish flows, and delete constraints.
 
 ## Resolved Product Decisions
 
