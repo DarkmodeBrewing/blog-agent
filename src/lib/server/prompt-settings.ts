@@ -33,7 +33,8 @@ export const setModelSettings = (input: { models: string[]; selectedModel: strin
       owner: snapshot.github.owner,
       repo: snapshot.github.repo,
       branch: snapshot.github.branch,
-      blogPostPath: snapshot.github.blogPostPath
+      blogPostPath: snapshot.github.blogPostPath,
+      unpublishStrategy: snapshot.github.unpublishStrategy
     },
     markdownExport: {
       downloadEnabled: snapshot.markdownExport.downloadEnabled,

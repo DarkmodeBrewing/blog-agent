@@ -175,6 +175,7 @@
   let editorPost = $derived(posts.find((post) => post.slug === editorSlug) ?? null);
   let hasDraft = $derived(Boolean(editorSlug));
   let editorLocked = $derived(Boolean(editorPost && !editorPost.isEditable));
+  let editorLockTargets = $derived(editorPost?.publicationSummary.livePublishedTargets ?? []);
   let canDeleteEditorPost = $derived(
     Boolean(
       editorPost &&
@@ -195,7 +196,15 @@
       .map((item) => item.trim())
       .filter(Boolean);
 
-  const canUnpublishTarget = (target: string) => target === 'github_repo';
+  const canUnpublishTarget = (target: string) =>
+    target === 'github_repo' || target === 'markdown_disk_export';
+
+  const getTargetLabel = (target: string) =>
+    target === 'github_repo'
+      ? 'GitHub'
+      : target === 'markdown_disk_export'
+        ? 'Disk export'
+        : target;
 
   const getReferenceOpenLabel = (post: PostRecord) => {
     switch (post.status) {
@@ -1153,7 +1162,7 @@
                   type="button"
                   onclick={() => void unpublishEditorPost(target)}
                 >
-                  Unpublish {target}
+                  Unpublish {getTargetLabel(target)}
                 </button>
               {/if}
             {/each}
@@ -1219,7 +1228,10 @@
           <div
             class="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
           >
-            <p class="font-medium">This post is locked because it has been published.</p>
+            <p class="font-medium">
+              This post is locked because it has active live publications on
+              {editorLockTargets.join(', ')}.
+            </p>
             <p class="mt-1">
               Open it in preview or create a copy to continue editing without changing the published
               version.

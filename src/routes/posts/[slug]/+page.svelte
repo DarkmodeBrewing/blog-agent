@@ -62,6 +62,7 @@
     detail?.bundle?.posts.find((post) => post.slug === selectedSlug) ?? detail?.post ?? null
   );
   let bundlePosts = $derived(detail?.bundle?.posts ?? (detail?.post ? [detail.post] : []));
+  let currentLockTargets = $derived(currentPost?.publicationSummary.livePublishedTargets ?? []);
   let canDeleteCurrentPost = $derived(
     Boolean(
       currentPost &&
@@ -70,7 +71,15 @@
     )
   );
 
-  const canUnpublishTarget = (target: string) => target === 'github_repo';
+  const canUnpublishTarget = (target: string) =>
+    target === 'github_repo' || target === 'markdown_disk_export';
+
+  const getTargetLabel = (target: string) =>
+    target === 'github_repo'
+      ? 'GitHub'
+      : target === 'markdown_disk_export'
+        ? 'Disk export'
+        : target;
 
   const loadPost = async () => {
     const routeSlug = page.params.slug;
@@ -192,7 +201,7 @@
                 type="button"
                 onclick={() => void unpublishCurrentPost(target)}
               >
-                Unpublish {target}
+                Unpublish {getTargetLabel(target)}
               </button>
             {/if}
           {/each}
@@ -307,7 +316,8 @@
 
         {#if currentPost.isPublished}
           <p class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-            This post is locked because it has been published. Create a copy to continue editing.
+            This post is locked because it has active live publications on
+            {currentLockTargets.join(', ')}. Create a copy to continue editing.
           </p>
         {/if}
 

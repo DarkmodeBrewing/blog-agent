@@ -313,13 +313,13 @@ Status: Completed
   - [x] capability flags such as `supportsUnpublish`
 - [x] Implement initial GitHub unpublish behavior.
   - [x] current strategy: delete file from repository
-  - [ ] configurable strategy:
-    - [ ] delete file
-    - [ ] mark frontmatter as draft
+  - [x] configurable strategy:
+    - [x] delete file
+    - [x] mark frontmatter as draft
     - [ ] future archive/move strategy if needed
 - Decide and implement disk-export unpublish semantics.
-  - delete exported file
-  - or move/archive file
+  - [x] delete exported file
+  - [ ] move/archive file
 - [x] Recalculate lock/editability from active live publications only.
   - [x] no lock from download-only/export-only actions
 - [x] Add unpublish APIs.
@@ -332,7 +332,7 @@ Status: Completed
   - [x] show active published targets clearly
   - [x] show `Unpublish` per target where supported
   - [x] show `Delete post` only when allowed
-  - improve lock reason messaging
+  - [x] improve lock reason messaging
 - Add migration handling for existing publication rows.
   - classify old export rows correctly
   - avoid treating historical downloads as live publication

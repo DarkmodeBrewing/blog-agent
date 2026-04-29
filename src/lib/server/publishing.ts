@@ -1,5 +1,5 @@
 import matter from 'gray-matter';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import prettier from 'prettier';
 import {
@@ -66,7 +66,7 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     requiresConfiguration: true,
     kind: 'export',
     channel: 'markdown',
-    supportsUnpublish: false
+    supportsUnpublish: true
   },
   {
     id: 'github_repo',
@@ -469,6 +469,7 @@ const unpublishGitHubRepo = async (
 ) => {
   const octokit = getOctokit();
   const config = getGitHubRepoConfig();
+  const githubSettings = getGitHubPublishSettings();
   const latestPublication = getLatestPublicationForTarget(post.slug, 'github_repo');
 
   if (!latestPublication || latestPublication.status !== 'published') {
@@ -494,21 +495,77 @@ const unpublishGitHubRepo = async (
     sha = existing.data.sha;
   }
 
-  const result = await octokit.rest.repos.deleteFile({
-    owner: config.owner,
-    repo: config.repo,
-    path,
-    branch: config.ref,
-    message: `Unpublish blog post: ${post.title}`,
-    sha
+  let commitSha: string;
+  let externalId = sha;
+
+  logWorkflow({
+    level: 'info',
+    message: 'post.unpublish.started',
+    context: {
+      actionId: options?.actionId ?? null,
+      requestId: options?.requestId ?? null,
+      slug: post.slug,
+      target: 'github_repo'
+    },
+    details: {
+      path,
+      strategy: githubSettings.unpublishStrategy,
+      repo: `${config.owner}/${config.repo}`,
+      ref: config.ref
+    }
   });
+
+  if (githubSettings.unpublishStrategy === 'mark_frontmatter_draft') {
+    const existing = await octokit.rest.repos.getContent({
+      owner: config.owner,
+      repo: config.repo,
+      path,
+      ref: config.ref
+    });
+
+    if (Array.isArray(existing.data) || existing.data.type !== 'file') {
+      throw new Error(`GitHub path is not a file: ${path}`);
+    }
+
+    const currentContent = Buffer.from(existing.data.content, 'base64').toString('utf-8');
+    const parsed = matter(currentContent);
+    const updatedContent = await formatMarkdown(
+      matter.stringify(parsed.content.trim(), {
+        ...parsed.data,
+        draft: true
+      })
+    );
+    const result = await octokit.rest.repos.createOrUpdateFileContents({
+      owner: config.owner,
+      repo: config.repo,
+      path,
+      branch: config.ref,
+      message: `Unpublish blog post: ${post.title}`,
+      content: Buffer.from(updatedContent).toString('base64'),
+      sha: existing.data.sha
+    });
+
+    commitSha = result.data.commit.sha ?? '';
+    externalId = result.data.content?.sha ?? existing.data.sha;
+  } else {
+    const result = await octokit.rest.repos.deleteFile({
+      owner: config.owner,
+      repo: config.repo,
+      path,
+      branch: config.ref,
+      message: `Unpublish blog post: ${post.title}`,
+      sha
+    });
+
+    commitSha = result.data.commit.sha ?? '';
+  }
 
   const unpublishedPost = recordPostPublication(post.slug, {
     target: 'github_repo',
     status: 'unpublished',
     filePath: path,
-    commitSha: result.data.commit.sha,
-    externalId: sha,
+    commitSha,
+    externalId,
     remoteUrl: latestPublication.remoteUrl,
     artifact: latestPublication.artifact
   });
@@ -529,9 +586,79 @@ const unpublishGitHubRepo = async (
       unpublishedPost;
   }
 
+  logWorkflow({
+    level: 'info',
+    message: 'post.unpublish.completed',
+    context: {
+      actionId: options?.actionId ?? null,
+      requestId: options?.requestId ?? null,
+      slug: nextPost.slug,
+      target: 'github_repo'
+    },
+    details: {
+      path,
+      strategy: githubSettings.unpublishStrategy,
+      commitSha,
+      returnedToDraft: Boolean(options?.returnToDraft)
+    }
+  });
+
   return {
     post: nextPost,
-    commitSha: result.data.commit.sha
+    commitSha
+  };
+};
+
+const unpublishMarkdownDiskExport = async (
+  post: PostRecord,
+  options?: { actionId?: string | null; requestId?: string | null; returnToDraft?: boolean }
+) => {
+  const latestPublication = getLatestPublicationForTarget(post.slug, 'markdown_disk_export');
+
+  if (!latestPublication || latestPublication.status !== 'published') {
+    throw new Error('Post is not currently exported to disk');
+  }
+
+  const filePath = latestPublication.filePath;
+
+  if (!filePath) {
+    throw new Error('Disk export file path is missing for the latest publication record');
+  }
+
+  const fileExisted = existsSync(filePath);
+  if (fileExisted) {
+    rmSync(filePath);
+  }
+
+  const unpublishedPost = recordPostPublication(post.slug, {
+    target: 'markdown_disk_export',
+    status: 'unpublished',
+    filePath,
+    artifact: latestPublication.artifact
+  });
+
+  if (!unpublishedPost) {
+    throw new Error(`Post not found while recording unpublish: ${post.slug}`);
+  }
+
+  logWorkflow({
+    level: 'info',
+    message: 'post.unpublish.completed',
+    context: {
+      actionId: options?.actionId ?? null,
+      requestId: options?.requestId ?? null,
+      slug: unpublishedPost.slug,
+      target: 'markdown_disk_export'
+    },
+    details: {
+      filePath,
+      fileExisted
+    }
+  });
+
+  return {
+    post: unpublishedPost,
+    filePath
   };
 };
 
@@ -576,6 +703,8 @@ export const unpublishPost = async (
   });
 
   switch (target) {
+    case 'markdown_disk_export':
+      return unpublishMarkdownDiskExport(post, options);
     case 'github_repo':
       return unpublishGitHubRepo(post, options);
     default:

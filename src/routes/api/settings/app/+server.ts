@@ -33,7 +33,8 @@ const SettingsUpdateSchema = z.object({
     owner: z.string(),
     repo: z.string(),
     branch: z.string(),
-    blogPostPath: z.string()
+    blogPostPath: z.string(),
+    unpublishStrategy: z.enum(['delete_file', 'mark_frontmatter_draft'])
   }),
   markdownExport: z.object({
     downloadEnabled: z.boolean(),
