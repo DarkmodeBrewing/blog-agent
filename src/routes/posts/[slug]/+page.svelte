@@ -88,12 +88,14 @@
 
   const getTargetLabel = (target: string) => (target === 'github_repo' ? 'GitHub' : target);
 
-  const loadPost = async () => {
+  const loadPost = async (options?: { preserveStatusMessage?: boolean }) => {
     const routeSlug = page.params.slug;
     if (!routeSlug) return;
 
     loading = true;
-    statusMessage = '';
+    if (!options?.preserveStatusMessage) {
+      statusMessage = '';
+    }
     errorMessage = '';
 
     try {
@@ -132,7 +134,7 @@
       statusMessage = returnToDraft
         ? `Unpublished ${target} and returned post to draft`
         : `Unpublished ${target}`;
-      await loadPost();
+      await loadPost({ preserveStatusMessage: true });
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : 'Failed to unpublish post';
     } finally {

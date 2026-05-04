@@ -110,7 +110,7 @@ export const selectPublicationRowsForPost = (postId: number) => {
     .select()
     .from(postPublications)
     .where(eq(postPublications.postId, postId))
-    .orderBy(desc(postPublications.updatedAt))
+    .orderBy(desc(postPublications.updatedAt), desc(postPublications.id))
     .all();
 };
 
@@ -123,7 +123,7 @@ export const selectPublicationRowsForPosts = (postIds: number[]) => {
     .select()
     .from(postPublications)
     .where(inArray(postPublications.postId, postIds))
-    .orderBy(desc(postPublications.updatedAt))
+    .orderBy(desc(postPublications.updatedAt), desc(postPublications.id))
     .all();
 };
 
@@ -154,6 +154,7 @@ export const upsertPostRow = (values: PostInsertRow) => {
         githubSha: values.githubSha ?? null,
         source: values.source,
         lockedAt: values.lockedAt ?? null,
+        deletedAt: values.deletedAt ?? null,
         updatedAt: sql`datetime('now')`
       }
     })
