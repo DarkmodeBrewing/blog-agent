@@ -43,6 +43,7 @@
   - any migration or config impact,
   - validation performed (`check`, `lint`, `build`),
   - screenshots only for meaningful UI changes.
+- When checking PR comments and fixing them, mark them as resolved
 
 ## Security & Configuration Tips
 
