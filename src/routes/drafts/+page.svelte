@@ -2,6 +2,7 @@
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
   import { apiUrl, requestJson } from '$lib/client/request-json';
+  import { formatTimestamp } from '$lib/time';
   import { onDestroy, onMount, tick } from 'svelte';
 
   type PostStatus = 'synced' | 'draft' | 'approved' | 'committed' | 'rejected';
@@ -20,9 +21,24 @@
     contentType: 'blog' | 'x' | 'linkedin' | 'instagram' | 'generic';
     variantRole: 'primary' | 'derived' | 'standalone';
     lockedAt: string | null;
+    deletedAt: string | null;
+    publications: Array<{
+      id: number;
+      target: string;
+      status: 'not_published' | 'published' | 'unpublished' | 'failed';
+      remoteUrl: string | null;
+      filePath: string | null;
+      commitSha: string | null;
+      error: string | null;
+      publishedAt: string | null;
+      unpublishedAt: string | null;
+      updatedAt: string;
+    }>;
     publicationSummary: {
       total: number;
       publishedTargets: string[];
+      livePublishedTargets: string[];
+      exportedTargets: string[];
       failedTargets: string[];
       latestPublishedAt: string | null;
       latestTarget: string | null;
@@ -173,6 +189,14 @@
   let editorPost = $derived(posts.find((post) => post.slug === editorSlug) ?? null);
   let hasDraft = $derived(Boolean(editorSlug));
   let editorLocked = $derived(Boolean(editorPost && !editorPost.isEditable));
+  let editorLockTargets = $derived(editorPost?.publicationSummary.livePublishedTargets ?? []);
+  let canDeleteEditorPost = $derived(
+    Boolean(
+      editorPost &&
+      editorPost.publicationSummary.livePublishedTargets.length === 0 &&
+      (editorPost.status === 'draft' || editorPost.status === 'rejected')
+    )
+  );
   let generationBlocked = $derived(appReadiness ? !appReadiness.readyForGeneration : false);
   let controlsDisabled = $derived(generating || saving || publishing || generationBlocked);
 
@@ -185,6 +209,10 @@
       .split(',')
       .map((item) => item.trim())
       .filter(Boolean);
+
+  const canUnpublishTarget = (target: string) => target === 'github_repo';
+
+  const getTargetLabel = (target: string) => (target === 'github_repo' ? 'GitHub' : target);
 
   const getReferenceOpenLabel = (post: PostRecord) => {
     switch (post.status) {
@@ -635,6 +663,67 @@
     }
   };
 
+  const unpublishEditorPost = async (target: string, returnToDraft = false) => {
+    if (!editorSlug) return;
+
+    publishing = true;
+    statusMessage = '';
+    errorMessage = '';
+
+    try {
+      await requestJson<{ result: { post: PostRecord } }>(
+        apiUrl(
+          `/api/posts/${encodeURIComponent(editorSlug)}/unpublish/${encodeURIComponent(target)}`
+        ),
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ returnToDraft })
+        }
+      );
+
+      statusMessage = returnToDraft
+        ? `${editorSlug} unpublished from ${target} and returned to draft`
+        : `${editorSlug} unpublished from ${target}`;
+      await loadPosts();
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Failed to unpublish post';
+    } finally {
+      publishing = false;
+    }
+  };
+
+  const deleteEditorPost = async () => {
+    if (!editorSlug || !editorPost) return;
+    if (!confirm(`Move "${editorPost.title}" to deleted posts?`)) return;
+
+    publishing = true;
+    statusMessage = '';
+    errorMessage = '';
+
+    try {
+      await requestJson<{ deleted: boolean }>(
+        apiUrl(`/api/posts/${encodeURIComponent(editorSlug)}`),
+        {
+          method: 'DELETE'
+        }
+      );
+      statusMessage = `${editorSlug} deleted`;
+      editorSlug = '';
+      editorTitle = '';
+      editorIngress = '';
+      editorTags = '';
+      editorBody = '';
+      editorBundlePosts = [];
+      editorRelatedPosts = [];
+      await loadPosts();
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Failed to delete post';
+    } finally {
+      publishing = false;
+    }
+  };
+
   onMount(() => {
     void (async () => {
       await loadPosts();
@@ -1072,6 +1161,40 @@
           >
             {publishing ? 'Publishing...' : 'Publish'}
           </button>
+          {#if editorPost?.publicationSummary.livePublishedTargets.length}
+            {#each editorPost.publicationSummary.livePublishedTargets as target (target)}
+              {#if canUnpublishTarget(target)}
+                <button
+                  class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+                  disabled={!hasDraft || controlsDisabled}
+                  type="button"
+                  onclick={() => void unpublishEditorPost(target)}
+                >
+                  Unpublish {getTargetLabel(target)}
+                </button>
+              {/if}
+            {/each}
+            {#if editorPost.publicationSummary.livePublishedTargets.includes('github_repo')}
+              <button
+                class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+                disabled={!hasDraft || controlsDisabled}
+                type="button"
+                onclick={() => void unpublishEditorPost('github_repo', true)}
+              >
+                Unpublish and return to draft
+              </button>
+            {/if}
+          {/if}
+          {#if canDeleteEditorPost}
+            <button
+              class="rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-700 disabled:opacity-50"
+              disabled={!hasDraft || controlsDisabled}
+              type="button"
+              onclick={() => void deleteEditorPost()}
+            >
+              Move to deleted
+            </button>
+          {/if}
           {#if editorLocked}
             <button
               class="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
@@ -1113,7 +1236,10 @@
           <div
             class="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
           >
-            <p class="font-medium">This post is locked because it has been published.</p>
+            <p class="font-medium">
+              This post is locked because it has active live publications on
+              {editorLockTargets.join(', ')}.
+            </p>
             <p class="mt-1">
               Open it in preview or create a copy to continue editing without changing the published
               version.
@@ -1130,12 +1256,58 @@
             <span class="rounded bg-slate-100 px-2 py-1 text-slate-700">
               {editorPost.variantRole}
             </span>
-            {#each editorPost.publicationSummary.publishedTargets as target (target)}
+            {#each editorPost.publicationSummary.livePublishedTargets as target (target)}
               <span class="rounded bg-emerald-50 px-2 py-1 font-medium text-emerald-800">
-                Published: {target}
+                Live: {target}
+              </span>
+            {/each}
+            {#each editorPost.publicationSummary.exportedTargets as target (target)}
+              <span class="rounded bg-cyan-50 px-2 py-1 font-medium text-cyan-800">
+                Exported: {target}
               </span>
             {/each}
           </div>
+        {/if}
+
+        {#if editorPost?.publications.length}
+          <section class="rounded-md border border-slate-200 bg-slate-50 p-4">
+            <h3 class="text-sm font-semibold text-slate-900">Publication history</h3>
+            <div class="mt-3 overflow-x-auto">
+              <table class="w-full min-w-[42rem] text-left text-sm">
+                <thead class="bg-white text-xs text-slate-500 uppercase">
+                  <tr>
+                    <th class="px-3 py-2" scope="col">Target</th>
+                    <th class="px-3 py-2" scope="col">Status</th>
+                    <th class="px-3 py-2" scope="col">Published</th>
+                    <th class="px-3 py-2" scope="col">Unpublished</th>
+                    <th class="px-3 py-2" scope="col">Reference</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each editorPost.publications as publication (publication.id)}
+                    <tr class="border-t border-slate-200">
+                      <td class="px-3 py-2 text-slate-700">{publication.target}</td>
+                      <td class="px-3 py-2 text-slate-700">{publication.status}</td>
+                      <td class="px-3 py-2 text-slate-700">
+                        {publication.publishedAt ? formatTimestamp(publication.publishedAt) : '—'}
+                      </td>
+                      <td class="px-3 py-2 text-slate-700">
+                        {publication.unpublishedAt
+                          ? formatTimestamp(publication.unpublishedAt)
+                          : '—'}
+                      </td>
+                      <td class="px-3 py-2 text-slate-700">
+                        {publication.remoteUrl ??
+                          publication.filePath ??
+                          publication.commitSha ??
+                          '—'}
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          </section>
         {/if}
 
         {#if editorRelatedPosts.length > 0}

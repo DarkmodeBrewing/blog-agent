@@ -296,43 +296,53 @@ Status: Completed
 
 ## Phase 13: Publication Lifecycle and Deletion Workflow
 
-- Reclassify publish targets into:
+- Status: Completed
+
+- [x] Reclassify publish targets into:
   - export targets
   - live publication targets
-- Stop treating export targets as live publication state.
-  - `markdown_download` must not lock content
-  - `markdown_disk_export` should be evaluated explicitly as export-only or managed publication
+- [x] Stop treating export targets as live publication state.
+  - [x] `markdown_download` must not lock content
+  - [x] `markdown_disk_export` is currently treated as export-only in the application state model
 - Extend publication records.
-  - add `unpublished` delivery state
-  - add `unpublished_at`
+  - [x] add `unpublished` delivery state
+  - [x] add `unpublished_at`
   - preserve prior publication history instead of overwriting it
-- Add adapter unpublish capability.
-  - common `unpublish(...)` contract
-  - capability flags such as `supportsUnpublish`
-- Implement GitHub unpublish behavior.
-  - configurable strategy:
-    - delete file
-    - mark frontmatter as draft
-    - future archive/move strategy if needed
-- Decide and implement disk-export unpublish semantics.
-  - delete exported file
-  - or move/archive file
-- Recalculate lock/editability from active live publications only.
-  - no lock from download-only/export-only actions
-- Add unpublish APIs.
-  - unpublish by target
-  - optional `unpublish all and return to draft`
-- Add delete API for local content.
-  - allow delete only when no active live publications remain
-  - block delete with clear error when active live publications still exist
+- [x] Add adapter unpublish capability.
+  - [x] common `unpublish(...)` contract
+  - [x] capability flags such as `supportsUnpublish`
+- [x] Implement initial GitHub unpublish behavior.
+  - [x] current strategy: delete file from repository
+  - [x] configurable strategy:
+    - [x] delete file
+    - [x] mark frontmatter as draft
+    - [ ] future archive/move strategy if needed
+- [x] Reclassify disk export as export-only history.
+  - [x] do not treat disk export as live publication state
+  - [x] remove disk export from unpublish workflow
+- Soft delete and restore workflow.
+  - [x] replace hard delete with soft delete
+  - [x] exclude deleted posts from default listings and detail routes
+  - [x] add deleted-posts restore UI
+- [x] Recalculate lock/editability from active live publications only.
+  - [x] no lock from download-only/export-only actions
+- [x] Add unpublish APIs.
+  - [x] unpublish by target
+  - [x] optional `unpublish and return to draft`
+- [x] Add delete API for local content.
+  - [x] allow delete only when no active live publications remain
+  - [x] block delete with clear error when active live publications still exist
 - Refactor UI for publication lifecycle.
-  - show active published targets clearly
-  - show `Unpublish` per target where supported
-  - show `Delete post` only when allowed
-  - improve lock reason messaging
+  - [x] show active published targets clearly
+  - [x] show `Unpublish` per target where supported
+  - [x] show `Delete post` only when allowed
+  - [x] improve lock reason messaging
+- [x] Add publication history UI.
+  - [x] post detail
+  - [x] draft editor
 - Add migration handling for existing publication rows.
-  - classify old export rows correctly
-  - avoid treating historical downloads as live publication
+  - [x] classify old export rows correctly
+  - [x] avoid treating historical downloads as live publication
 
 ## Suggested Execution Order
 

@@ -23,6 +23,7 @@ const settingKeys = {
   githubRepo: 'github_repo_name',
   githubBranch: 'github_repo_branch',
   githubContentPath: 'github_repo_blog_post_path',
+  githubUnpublishStrategy: 'github_repo_unpublish_strategy',
   markdownDownloadEnabled: 'markdown_download_enabled',
   markdownDiskExportEnabled: 'markdown_disk_export_enabled',
   markdownDiskExportPath: 'markdown_disk_export_path',
@@ -92,6 +93,7 @@ export type GitHubPublishSettings = {
   repo: string;
   branch: string;
   blogPostPath: string;
+  unpublishStrategy: 'delete_file' | 'mark_frontmatter_draft';
 };
 
 export type MarkdownExportSettings = {
@@ -115,6 +117,7 @@ export type AppSettingsSnapshot = {
     repo: string;
     branch: string;
     blogPostPath: string;
+    unpublishStrategy: 'delete_file' | 'mark_frontmatter_draft';
   };
   markdownExport: MarkdownExportSettings;
   frontmatter: FrontmatterTemplate;
@@ -156,6 +159,7 @@ type AppSettingsUpdateInput = {
     repo: string;
     branch: string;
     blogPostPath: string;
+    unpublishStrategy: 'delete_file' | 'mark_frontmatter_draft';
   };
   markdownExport: MarkdownExportSettings;
   frontmatter: FrontmatterTemplate;
@@ -333,7 +337,11 @@ export const getGitHubPublishSettings = (): GitHubPublishSettings => ({
   owner: getSetting(settingKeys.githubOwner)?.trim() ?? '',
   repo: getSetting(settingKeys.githubRepo)?.trim() ?? '',
   branch: getSetting(settingKeys.githubBranch)?.trim() || 'main',
-  blogPostPath: normalizePath(getSetting(settingKeys.githubContentPath)?.trim() ?? '')
+  blogPostPath: normalizePath(getSetting(settingKeys.githubContentPath)?.trim() ?? ''),
+  unpublishStrategy:
+    getSetting(settingKeys.githubUnpublishStrategy) === 'mark_frontmatter_draft'
+      ? 'mark_frontmatter_draft'
+      : 'delete_file'
 });
 
 export const getMarkdownExportSettings = (): MarkdownExportSettings => ({
@@ -372,7 +380,8 @@ export const getAppSettingsSnapshot = (): AppSettingsSnapshot => {
       owner: github.owner,
       repo: github.repo,
       branch: github.branch,
-      blogPostPath: github.blogPostPath
+      blogPostPath: github.blogPostPath,
+      unpublishStrategy: github.unpublishStrategy
     },
     markdownExport,
     frontmatter
@@ -481,6 +490,7 @@ export const updateAppSettings = (
   setSetting(settingKeys.githubRepo, input.github.repo.trim());
   setSetting(settingKeys.githubBranch, input.github.branch.trim() || 'main');
   setSetting(settingKeys.githubContentPath, normalizePath(input.github.blogPostPath));
+  setSetting(settingKeys.githubUnpublishStrategy, input.github.unpublishStrategy);
 
   setSetting(settingKeys.markdownDownloadEnabled, String(input.markdownExport.downloadEnabled));
   setSetting(settingKeys.markdownDiskExportEnabled, String(input.markdownExport.diskExportEnabled));
@@ -509,6 +519,7 @@ export const updateAppSettings = (
       githubEnabled: updated.github.enabled,
       previousGitHubEnabled: existing.github.enabled,
       githubConfigured: updated.github.tokenConfigured,
+      githubUnpublishStrategy: updated.github.unpublishStrategy,
       markdownDownloadEnabled: updated.markdownExport.downloadEnabled,
       markdownDiskExportEnabled: updated.markdownExport.diskExportEnabled,
       readinessStatus: nextReadiness.status,

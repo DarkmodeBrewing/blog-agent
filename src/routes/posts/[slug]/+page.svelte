@@ -20,10 +20,25 @@
     source: 'github' | 'generated' | 'manual';
     githubPath: string | null;
     lockedAt: string | null;
+    deletedAt: string | null;
     updatedAt: string;
+    publications: Array<{
+      id: number;
+      target: string;
+      status: 'not_published' | 'published' | 'unpublished' | 'failed';
+      remoteUrl: string | null;
+      filePath: string | null;
+      commitSha: string | null;
+      error: string | null;
+      publishedAt: string | null;
+      unpublishedAt: string | null;
+      updatedAt: string;
+    }>;
     publicationSummary: {
       total: number;
       publishedTargets: string[];
+      livePublishedTargets: string[];
+      exportedTargets: string[];
       failedTargets: string[];
       latestPublishedAt: string | null;
       latestTarget: string | null;
@@ -52,18 +67,35 @@
   let detail = $state<PostDetailResponse | null>(null);
   let selectedSlug = $state('');
   let loading = $state(false);
+  let mutating = $state(false);
+  let statusMessage = $state('');
   let errorMessage = $state('');
 
   let currentPost = $derived(
     detail?.bundle?.posts.find((post) => post.slug === selectedSlug) ?? detail?.post ?? null
   );
   let bundlePosts = $derived(detail?.bundle?.posts ?? (detail?.post ? [detail.post] : []));
+  let currentLockTargets = $derived(currentPost?.publicationSummary.livePublishedTargets ?? []);
+  let canDeleteCurrentPost = $derived(
+    Boolean(
+      currentPost &&
+      currentPost.publicationSummary.livePublishedTargets.length === 0 &&
+      (currentPost.status === 'draft' || currentPost.status === 'rejected')
+    )
+  );
 
-  const loadPost = async () => {
+  const canUnpublishTarget = (target: string) => target === 'github_repo';
+
+  const getTargetLabel = (target: string) => (target === 'github_repo' ? 'GitHub' : target);
+
+  const loadPost = async (options?: { preserveStatusMessage?: boolean }) => {
     const routeSlug = page.params.slug;
     if (!routeSlug) return;
 
     loading = true;
+    if (!options?.preserveStatusMessage) {
+      statusMessage = '';
+    }
     errorMessage = '';
 
     try {
@@ -77,6 +109,58 @@
       detail = null;
     } finally {
       loading = false;
+    }
+  };
+
+  const unpublishCurrentPost = async (target: string, returnToDraft = false) => {
+    if (!currentPost) return;
+
+    mutating = true;
+    statusMessage = '';
+    errorMessage = '';
+
+    try {
+      await requestJson<{ result: { post: PostRecord } }>(
+        apiUrl(
+          `/api/posts/${encodeURIComponent(currentPost.slug)}/unpublish/${encodeURIComponent(target)}`
+        ),
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ returnToDraft })
+        }
+      );
+
+      statusMessage = returnToDraft
+        ? `Unpublished ${target} and returned post to draft`
+        : `Unpublished ${target}`;
+      await loadPost({ preserveStatusMessage: true });
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Failed to unpublish post';
+    } finally {
+      mutating = false;
+    }
+  };
+
+  const deleteCurrentPost = async () => {
+    if (!currentPost) return;
+    if (!confirm(`Move "${currentPost.title}" to deleted posts?`)) return;
+
+    mutating = true;
+    statusMessage = '';
+    errorMessage = '';
+
+    try {
+      await requestJson<{ deleted: boolean }>(
+        apiUrl(`/api/posts/${encodeURIComponent(currentPost.slug)}`),
+        {
+          method: 'DELETE'
+        }
+      );
+      window.location.href = resolve('/posts');
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : 'Failed to delete post';
+      mutating = false;
     }
   };
 
@@ -117,6 +201,40 @@
             Create copy
           </a>
         {/if}
+        {#if currentPost.publicationSummary.livePublishedTargets.length > 0}
+          {#each currentPost.publicationSummary.livePublishedTargets as target (target)}
+            {#if canUnpublishTarget(target)}
+              <button
+                class="inline-flex rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+                disabled={mutating}
+                type="button"
+                onclick={() => void unpublishCurrentPost(target)}
+              >
+                Unpublish {getTargetLabel(target)}
+              </button>
+            {/if}
+          {/each}
+          {#if currentPost.publicationSummary.livePublishedTargets.includes('github_repo')}
+            <button
+              class="inline-flex rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+              disabled={mutating}
+              type="button"
+              onclick={() => void unpublishCurrentPost('github_repo', true)}
+            >
+              Unpublish and return to draft
+            </button>
+          {/if}
+        {/if}
+        {#if canDeleteCurrentPost}
+          <button
+            class="inline-flex rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-700 disabled:opacity-50"
+            disabled={mutating}
+            type="button"
+            onclick={() => void deleteCurrentPost()}
+          >
+            Move to deleted
+          </button>
+        {/if}
       </div>
     {/if}
   </div>
@@ -124,6 +242,14 @@
   {#if errorMessage}
     <p class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
       {errorMessage}
+    </p>
+  {/if}
+
+  {#if statusMessage}
+    <p
+      class="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800"
+    >
+      {statusMessage}
     </p>
   {/if}
 
@@ -197,21 +323,68 @@
           </div>
         </div>
 
-        {#if currentPost.lockedAt}
+        {#if currentPost.isPublished}
           <p class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-            This post is locked because it has been published. Create a copy to continue editing.
+            This post is locked because it has active live publications on
+            {currentLockTargets.join(', ')}. Create a copy to continue editing.
           </p>
         {/if}
 
         {#if currentPost.publicationSummary.publishedTargets.length > 0}
           <section class="space-y-2">
-            <h3 class="text-sm font-semibold text-slate-950">Published targets</h3>
+            <h3 class="text-sm font-semibold text-slate-950">Current target state</h3>
             <div class="flex flex-wrap gap-2">
-              {#each currentPost.publicationSummary.publishedTargets as target (target)}
+              {#each currentPost.publicationSummary.livePublishedTargets as target (target)}
                 <span class="rounded bg-emerald-50 px-2 py-1 text-xs text-emerald-800">
-                  {target}
+                  Live: {target}
                 </span>
               {/each}
+              {#each currentPost.publicationSummary.exportedTargets as target (target)}
+                <span class="rounded bg-cyan-50 px-2 py-1 text-xs text-cyan-800">
+                  Exported: {target}
+                </span>
+              {/each}
+            </div>
+          </section>
+        {/if}
+
+        {#if currentPost.publications.length > 0}
+          <section class="space-y-2">
+            <h3 class="text-sm font-semibold text-slate-950">Publication history</h3>
+            <div class="overflow-x-auto">
+              <table class="w-full min-w-[42rem] text-left text-sm">
+                <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+                  <tr>
+                    <th class="px-3 py-2" scope="col">Target</th>
+                    <th class="px-3 py-2" scope="col">Status</th>
+                    <th class="px-3 py-2" scope="col">Published</th>
+                    <th class="px-3 py-2" scope="col">Unpublished</th>
+                    <th class="px-3 py-2" scope="col">Reference</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each currentPost.publications as publication (publication.id)}
+                    <tr class="border-t border-slate-100">
+                      <td class="px-3 py-2 text-slate-700">{publication.target}</td>
+                      <td class="px-3 py-2 text-slate-700">{publication.status}</td>
+                      <td class="px-3 py-2 text-slate-700">
+                        {publication.publishedAt ? formatTimestamp(publication.publishedAt) : '—'}
+                      </td>
+                      <td class="px-3 py-2 text-slate-700">
+                        {publication.unpublishedAt
+                          ? formatTimestamp(publication.unpublishedAt)
+                          : '—'}
+                      </td>
+                      <td class="px-3 py-2 text-slate-700">
+                        {publication.remoteUrl ??
+                          publication.filePath ??
+                          publication.commitSha ??
+                          '—'}
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
             </div>
           </section>
         {/if}

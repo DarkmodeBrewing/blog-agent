@@ -14,21 +14,30 @@ import {
   selectPostRowBySlug,
   selectPostRows,
   selectPostRowsByBundleId,
+  markPostDeletedById,
+  restoreDeletedPostById,
   upsertPostRow,
   type PostPublicationRow,
   type PostRow
 } from './repositories/content-repository';
 import {
   insertPublicationRecord,
-  lockPublishedPostById
+  lockPublishedPostById,
+  unlockPublishedPostById
 } from './repositories/publishing-repository';
-import { selectSyncedPostRowBySlug } from './repositories/sync-repository';
+import { isLivePublicationTarget } from './publication-targets';
+import {
+  selectGitHubSourcedPostRows,
+  selectSyncedPostRowBySlug,
+  softDeleteSyncedPostById
+} from './repositories/sync-repository';
 
 export type PostStatus = 'synced' | 'draft' | 'approved' | 'committed' | 'rejected';
 export type PostSource = 'github' | 'generated' | 'manual';
 export type PostContentType = 'blog' | 'x' | 'linkedin' | 'instagram' | 'generic';
 export type PostVariantRole = 'primary' | 'derived' | 'standalone';
 export type PublicationStatus = 'not_published' | 'published' | 'failed';
+export type PublicationLifecycleStatus = PublicationStatus | 'unpublished';
 export type PublishTarget =
   | 'markdown_download'
   | 'markdown_disk_export'
@@ -41,7 +50,7 @@ export type PostPublicationRecord = {
   id: number;
   postId: number;
   target: PublishTarget;
-  status: PublicationStatus;
+  status: PublicationLifecycleStatus;
   externalId: string | null;
   remoteUrl: string | null;
   filePath: string | null;
@@ -50,12 +59,15 @@ export type PostPublicationRecord = {
   error: string | null;
   createdAt: string;
   publishedAt: string | null;
+  unpublishedAt: string | null;
   updatedAt: string;
 };
 
 export type PublicationSummary = {
   total: number;
   publishedTargets: PublishTarget[];
+  livePublishedTargets: PublishTarget[];
+  exportedTargets: PublishTarget[];
   failedTargets: PublishTarget[];
   latestPublishedAt: string | null;
   latestTarget: PublishTarget | null;
@@ -78,12 +90,14 @@ export type PostRecord = {
   githubSha: string | null;
   source: PostSource;
   lockedAt: string | null;
+  deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
   publications: PostPublicationRecord[];
   publicationSummary: PublicationSummary;
   isPublished: boolean;
   isEditable: boolean;
+  isDeleted: boolean;
 };
 
 export type PostBundleRecord = {
@@ -93,7 +107,8 @@ export type PostBundleRecord = {
   posts: PostRecord[];
   contentTypes: PostContentType[];
   editorialStatuses: PostStatus[];
-  publishedTargets: PublishTarget[];
+  livePublishedTargets: PublishTarget[];
+  exportedTargets: PublishTarget[];
   updatedAt: string;
 };
 
@@ -113,6 +128,7 @@ type UpsertPostInput = {
   githubSha?: string | null;
   source: PostSource;
   lockedAt?: string | null;
+  deletedAt?: string | null;
   statusNotes?: string;
 };
 
@@ -139,6 +155,7 @@ const mapPublicationRow = (row: PostPublicationRow): PostPublicationRecord => ({
   error: row.error,
   createdAt: normalizeTimestamp(row.createdAt) ?? row.createdAt,
   publishedAt: normalizeTimestamp(row.publishedAt),
+  unpublishedAt: normalizeTimestamp(row.unpublishedAt),
   updatedAt: normalizeTimestamp(row.updatedAt) ?? row.updatedAt
 });
 
@@ -168,22 +185,36 @@ const getPublicationSummary = (
   publications: PostPublicationRecord[],
   post?: Pick<PostRow, 'source' | 'githubPath' | 'status'>
 ): PublicationSummary => {
-  const published = publications.filter((publication) => publication.status === 'published');
-  const failed = publications.filter((publication) => publication.status === 'failed');
+  const latestByTarget = new Map<PublishTarget, PostPublicationRecord>();
+
+  for (const publication of publications) {
+    if (!latestByTarget.has(publication.target)) {
+      latestByTarget.set(publication.target, publication);
+    }
+  }
+
+  const currentPublications = [...latestByTarget.values()];
+  const published = currentPublications.filter((publication) => publication.status === 'published');
+  const failed = currentPublications.filter((publication) => publication.status === 'failed');
   const latestPublished = [...published].sort((a, b) =>
     (b.publishedAt ?? '').localeCompare(a.publishedAt ?? '')
   )[0];
   const implicitGitHubPublished =
     post?.source === 'github' && post.status === 'synced' && Boolean(post.githubPath);
   const publishedTargets = [...new Set(published.map((publication) => publication.target))];
+  const livePublishedTargets = publishedTargets.filter((target) => isLivePublicationTarget(target));
+  const exportedTargets = publishedTargets.filter((target) => !isLivePublicationTarget(target));
 
   if (implicitGitHubPublished) {
     publishedTargets.unshift('github_repo');
+    livePublishedTargets.unshift('github_repo');
   }
 
   return {
     total: publications.length,
     publishedTargets: [...new Set(publishedTargets)],
+    livePublishedTargets: [...new Set(livePublishedTargets)],
+    exportedTargets: [...new Set(exportedTargets)],
     failedTargets: [...new Set(failed.map((publication) => publication.target))],
     latestPublishedAt: latestPublished?.publishedAt ?? null,
     latestTarget: latestPublished?.target ?? (implicitGitHubPublished ? 'github_repo' : null)
@@ -196,8 +227,8 @@ const mapPostRow = (
 ): PostRecord => {
   const publications = publicationsByPostId?.get(row.id) ?? listPostPublications(row.id);
   const publicationSummary = getPublicationSummary(publications, row);
-  const isPublished = publicationSummary.publishedTargets.length > 0;
-  const isEditable = !row.lockedAt && !isPublished;
+  const isPublished = publicationSummary.livePublishedTargets.length > 0;
+  const isEditable = !isPublished;
 
   return {
     id: row.id,
@@ -216,12 +247,14 @@ const mapPostRow = (
     githubSha: row.githubSha,
     source: row.source,
     lockedAt: normalizeTimestamp(row.lockedAt),
+    deletedAt: normalizeTimestamp(row.deletedAt),
     createdAt: normalizeTimestamp(row.createdAt) ?? row.createdAt,
     updatedAt: normalizeTimestamp(row.updatedAt) ?? row.updatedAt,
     publications,
     publicationSummary,
     isPublished,
-    isEditable
+    isEditable,
+    isDeleted: Boolean(row.deletedAt)
   };
 };
 
@@ -244,18 +277,39 @@ const getStringArrayField = (data: Record<string, unknown>, key: string) => {
     : [];
 };
 
-export const listPosts = (status?: PostStatus) => {
-  return mapPostRows(selectPostRows(status));
+const getNextAvailableSlug = (baseSlug: string) => {
+  let nextSlug = baseSlug;
+  let counter = 2;
+
+  while (getPostBySlug(nextSlug, { includeDeleted: true })) {
+    nextSlug = `${baseSlug}-${counter}`;
+    counter += 1;
+  }
+
+  return nextSlug;
 };
 
-export const getPostBySlug = (slug: string) => {
-  const row = selectPostRowBySlug(slug);
+type PostListOptions = {
+  includeDeleted?: boolean;
+  onlyDeleted?: boolean;
+};
+
+export const listPosts = (status?: PostStatus, options?: PostListOptions) => {
+  return mapPostRows(selectPostRows(status, options));
+};
+
+export const getPostBySlug = (slug: string, options?: PostListOptions) => {
+  const row = selectPostRowBySlug(slug, options);
 
   return row ? mapPostRow(row) : null;
 };
 
-export const getPostsByBundleId = (bundleId: number, excludeSlug?: string) => {
-  const rows = selectPostRowsByBundleId(bundleId);
+export const getPostsByBundleId = (
+  bundleId: number,
+  excludeSlug?: string,
+  options?: PostListOptions
+) => {
+  const rows = selectPostRowsByBundleId(bundleId, options);
 
   return mapPostRows(rows).filter((post) => (excludeSlug ? post.slug !== excludeSlug : true));
 };
@@ -335,8 +389,11 @@ const mapBundlePosts = (bundlePosts: PostRecord[]): PostBundleRecord => {
     posts: sorted,
     contentTypes: [...new Set(sorted.map((post) => post.contentType))],
     editorialStatuses: [...new Set(sorted.map((post) => post.status))],
-    publishedTargets: [
-      ...new Set(sorted.flatMap((post) => post.publicationSummary.publishedTargets))
+    livePublishedTargets: [
+      ...new Set(sorted.flatMap((post) => post.publicationSummary.livePublishedTargets))
+    ],
+    exportedTargets: [
+      ...new Set(sorted.flatMap((post) => post.publicationSummary.exportedTargets))
     ],
     updatedAt: sorted.reduce(
       (latest, post) => (post.updatedAt > latest ? post.updatedAt : latest),
@@ -345,10 +402,10 @@ const mapBundlePosts = (bundlePosts: PostRecord[]): PostBundleRecord => {
   };
 };
 
-export const listPostBundles = (status?: PostStatus) => {
+export const listPostBundles = (status?: PostStatus, options?: PostListOptions) => {
   const grouped = new Map<string, PostRecord[]>();
 
-  for (const post of listPosts(status)) {
+  for (const post of listPosts(status, options)) {
     const key = toBundleKey(post);
     const existing = grouped.get(key);
 
@@ -380,7 +437,7 @@ export const createContentBundle = () => {
 };
 
 export const upsertPost = (input: UpsertPostInput) => {
-  const existing = getPostBySlug(input.slug);
+  const existing = getPostBySlug(input.slug, { includeDeleted: true });
 
   const values = {
     bundleId: input.bundleId ?? existing?.bundleId ?? null,
@@ -397,7 +454,8 @@ export const upsertPost = (input: UpsertPostInput) => {
     githubPath: input.githubPath ?? null,
     githubSha: input.githubSha ?? null,
     source: input.source,
-    lockedAt: input.lockedAt ?? existing?.lockedAt ?? null
+    lockedAt: input.lockedAt ?? existing?.lockedAt ?? null,
+    deletedAt: input.deletedAt ?? existing?.deletedAt ?? null
   };
 
   const result = upsertPostRow(values);
@@ -430,9 +488,10 @@ export const createDraftFromGeneration = (
   prompt: string
 ) => {
   const bundleId = createContentBundle();
+  const slug = getNextAvailableSlug(draft.slug);
   const { post } = upsertPost({
     bundleId,
-    slug: draft.slug,
+    slug,
     title: draft.title,
     ingress: draft.ingress ?? null,
     body: draft.body,
@@ -499,13 +558,7 @@ export const createVariantDraftFromGeneration = (
   }
 
   const slugBase = `${parent.slug}-${input.variant.platform}`;
-  let slug = slugBase;
-  let counter = 2;
-
-  while (getPostBySlug(slug)) {
-    slug = `${slugBase}-${counter}`;
-    counter += 1;
-  }
+  const slug = getNextAvailableSlug(slugBase);
 
   const titleSuffix = input.variant.platform === 'x' ? 'X Post' : 'LinkedIn Post';
   const { post } = upsertPost({
@@ -663,9 +716,14 @@ export const syncPostsFromGitHub = async () => {
   });
 
   const files = await getGitHubBlogPostFiles();
+  const currentPaths = new Set(files.map((file) => file.path));
+  const syncedSourcePosts = selectGitHubSourcedPostRows({ includeDeleted: true }).filter((post) =>
+    post.githubPath?.startsWith(`${config.blogPostPath}/`)
+  );
   let synced = 0;
   let inserted = 0;
   let updated = 0;
+  let softDeleted = 0;
 
   for (const file of files) {
     const parsed = matter(file.content);
@@ -702,6 +760,7 @@ export const syncPostsFromGitHub = async () => {
       githubPath: file.path,
       githubSha: file.sha,
       source: 'github',
+      deletedAt: null,
       statusNotes: 'Synced from GitHub'
     });
 
@@ -726,6 +785,26 @@ export const syncPostsFromGitHub = async () => {
     synced += 1;
   }
 
+  for (const post of syncedSourcePosts) {
+    if (!post.githubPath || currentPaths.has(post.githubPath) || post.deletedAt) {
+      continue;
+    }
+
+    softDeleteSyncedPostById(post.id);
+    softDeleted += 1;
+
+    logWorkflow({
+      level: 'info',
+      message: 'sync.post.soft_deleted',
+      details: {
+        slug: post.slug,
+        path: post.githubPath,
+        source: 'github',
+        reason: 'missing_from_repo'
+      }
+    });
+  }
+
   logWorkflow({
     level: 'info',
     message: 'sync.completed',
@@ -734,12 +813,14 @@ export const syncPostsFromGitHub = async () => {
       synced,
       inserted,
       updated,
+      softDeleted,
       skipped: files.length - synced
     }
   });
 
   return {
-    synced
+    synced,
+    softDeleted
   };
 };
 
@@ -747,7 +828,7 @@ export const recordPostPublication = (
   slug: string,
   input: {
     target: PublishTarget;
-    status: PublicationStatus;
+    status: PublicationLifecycleStatus;
     externalId?: string | null;
     remoteUrl?: string | null;
     filePath?: string | null;
@@ -771,14 +852,42 @@ export const recordPostPublication = (
     filePath: input.filePath ?? null,
     commitSha: input.commitSha ?? null,
     artifactJson: input.artifact ? JSON.stringify(input.artifact) : null,
-    error: input.error ?? null
+    error: input.error ?? null,
+    unpublishedAt:
+      input.status === 'unpublished'
+        ? new Date().toISOString().slice(0, 19).replace('T', ' ')
+        : null
   });
 
   if (input.status === 'published') {
-    lockPublishedPostById(post.id);
+    if (isLivePublicationTarget(input.target)) {
+      lockPublishedPostById(post.id);
+    }
+  } else {
+    const refreshedPost = getPostBySlug(slug);
+
+    if (refreshedPost && refreshedPost.publicationSummary.livePublishedTargets.length === 0) {
+      unlockPublishedPostById(post.id);
+    }
   }
 
   return getPostBySlug(slug);
+};
+
+export const getLatestPublicationForTarget = (slug: string, target: PublishTarget) => {
+  const post = getPostBySlug(slug);
+
+  if (!post) {
+    return null;
+  }
+
+  return post.publications.find((publication) => publication.target === target) ?? null;
+};
+
+export const getDeletedPostBySlug = (slug: string) => {
+  const post = getPostBySlug(slug, { includeDeleted: true });
+
+  return post?.isDeleted ? post : null;
 };
 
 export const createEditableCopy = (slug: string) => {
@@ -789,13 +898,7 @@ export const createEditableCopy = (slug: string) => {
   }
 
   const copySlugBase = `${post.slug}-copy`;
-  let nextSlug = copySlugBase;
-  let counter = 2;
-
-  while (getPostBySlug(nextSlug)) {
-    nextSlug = `${copySlugBase}-${counter}`;
-    counter += 1;
-  }
+  const nextSlug = getNextAvailableSlug(copySlugBase);
 
   const copy = upsertPost({
     bundleId: post.bundleId,
@@ -826,4 +929,70 @@ export const createEditableCopy = (slug: string) => {
   });
 
   return copy;
+};
+
+export const deletePost = (slug: string) => {
+  const post = getPostBySlug(slug);
+
+  if (!post) {
+    return null;
+  }
+
+  if (post.publicationSummary.livePublishedTargets.length > 0) {
+    throw new Error('Published posts must be unpublished before they can be deleted.');
+  }
+
+  if (!['draft', 'rejected'].includes(post.status)) {
+    throw new Error(`Only draft or rejected posts can be deleted. Current status: ${post.status}`);
+  }
+
+  markPostDeletedById(post.id);
+
+  logWorkflow({
+    level: 'info',
+    message: 'post.deleted',
+    details: {
+      slug,
+      postId: post.id,
+      status: post.status,
+      source: post.source,
+      contentType: post.contentType,
+      softDeleted: true
+    }
+  });
+
+  return {
+    slug,
+    deleted: true
+  };
+};
+
+export const restoreDeletedPost = (slug: string) => {
+  const post = getDeletedPostBySlug(slug);
+
+  if (!post) {
+    return null;
+  }
+
+  restoreDeletedPostById(post.id);
+
+  const restored = getPostBySlug(slug);
+
+  if (!restored) {
+    throw new Error(`Failed to restore deleted post: ${slug}`);
+  }
+
+  logWorkflow({
+    level: 'info',
+    message: 'post.restored',
+    details: {
+      slug,
+      postId: restored.id,
+      status: restored.status,
+      source: restored.source,
+      contentType: restored.contentType
+    }
+  });
+
+  return restored;
 };

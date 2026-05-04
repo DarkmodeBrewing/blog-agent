@@ -34,6 +34,7 @@
         repo: string;
         branch: string;
         blogPostPath: string;
+        unpublishStrategy: 'delete_file' | 'mark_frontmatter_draft';
       };
       markdownExport: {
         downloadEnabled: boolean;
@@ -96,6 +97,7 @@
   let githubRepo = $state('');
   let githubBranch = $state('main');
   let githubBlogPostPath = $state('');
+  let githubUnpublishStrategy = $state<'delete_file' | 'mark_frontmatter_draft'>('delete_file');
 
   let markdownDownloadEnabled = $state(true);
   let markdownDiskExportEnabled = $state(false);
@@ -159,6 +161,7 @@
     githubRepo = data.settings.github.repo;
     githubBranch = data.settings.github.branch;
     githubBlogPostPath = data.settings.github.blogPostPath;
+    githubUnpublishStrategy = data.settings.github.unpublishStrategy;
     githubTokenInput = '';
     clearGitHubToken = false;
 
@@ -252,7 +255,8 @@
             owner: githubOwner,
             repo: githubRepo,
             branch: githubBranch,
-            blogPostPath: githubBlogPostPath
+            blogPostPath: githubBlogPostPath,
+            unpublishStrategy: githubUnpublishStrategy
           },
           markdownExport: {
             downloadEnabled: markdownDownloadEnabled,
@@ -553,7 +557,23 @@
               placeholder="content/posts"
             />
           </label>
+
+          <label class="block sm:col-span-2">
+            <span class="text-sm font-medium text-slate-700">Unpublish strategy</span>
+            <select
+              bind:value={githubUnpublishStrategy}
+              class="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-900"
+            >
+              <option value="delete_file">Delete file from repository</option>
+              <option value="mark_frontmatter_draft">Mark frontmatter draft: true</option>
+            </select>
+          </label>
         </div>
+
+        <p class="text-sm text-slate-500">
+          Unpublish can either delete the committed file or update its frontmatter so downstream
+          site builds can exclude it as a draft.
+        </p>
       </section>
     </div>
   </section>

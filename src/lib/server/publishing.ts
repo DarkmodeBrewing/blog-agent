@@ -9,12 +9,14 @@ import {
 } from './app-settings';
 import { getOctokit } from './clients';
 import {
+  getLatestPublicationForTarget,
   getPostBySlug,
   recordPostPublication,
   type PostRecord,
   type PublishTarget as PostPublishTarget
 } from './post-library';
 import { getGitHubRepoConfig } from './get-posts-from-repo';
+import { getPublishTargetKind } from './publication-targets';
 import { logWorkflow } from './workflow-log';
 
 export type PublishTarget = PostPublishTarget;
@@ -25,7 +27,9 @@ export type PublishTargetDefinition = {
   description: string;
   implemented: boolean;
   requiresConfiguration: boolean;
-  kind: 'markdown' | 'repository' | 'cms' | 'social';
+  kind: 'export' | 'live_publication';
+  channel: 'markdown' | 'repository' | 'cms' | 'social';
+  supportsUnpublish: boolean;
 };
 
 export type PublishArtifact = {
@@ -50,7 +54,9 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     description: 'Return a Markdown artifact that can be downloaded in the browser.',
     implemented: true,
     requiresConfiguration: false,
-    kind: 'markdown'
+    kind: 'export',
+    channel: 'markdown',
+    supportsUnpublish: false
   },
   {
     id: 'markdown_disk_export',
@@ -58,7 +64,9 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     description: 'Write Markdown to a configured server-side export directory.',
     implemented: true,
     requiresConfiguration: true,
-    kind: 'markdown'
+    kind: 'export',
+    channel: 'markdown',
+    supportsUnpublish: false
   },
   {
     id: 'github_repo',
@@ -66,7 +74,9 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     description: 'Commit Markdown into a configured GitHub repository.',
     implemented: true,
     requiresConfiguration: true,
-    kind: 'repository'
+    kind: 'live_publication',
+    channel: 'repository',
+    supportsUnpublish: true
   },
   {
     id: 'cms_contentful',
@@ -74,7 +84,9 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     description: 'Reserved CMS adapter placeholder.',
     implemented: false,
     requiresConfiguration: true,
-    kind: 'cms'
+    kind: 'live_publication',
+    channel: 'cms',
+    supportsUnpublish: false
   },
   {
     id: 'social_x',
@@ -82,7 +94,9 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     description: 'Reserved social adapter placeholder.',
     implemented: false,
     requiresConfiguration: true,
-    kind: 'social'
+    kind: 'live_publication',
+    channel: 'social',
+    supportsUnpublish: false
   },
   {
     id: 'social_linkedin',
@@ -90,7 +104,9 @@ const publishTargetDefinitions: PublishTargetDefinition[] = [
     description: 'Reserved social adapter placeholder.',
     implemented: false,
     requiresConfiguration: true,
-    kind: 'social'
+    kind: 'live_publication',
+    channel: 'social',
+    supportsUnpublish: false
   }
 ];
 
@@ -386,6 +402,11 @@ export const isPublishTargetReady = (target: PublishTarget) => {
   }
 };
 
+export const canUnpublishTarget = (target: PublishTarget) => {
+  const definition = publishTargetDefinitions.find((item) => item.id === target);
+  return Boolean(definition?.implemented && definition.supportsUnpublish);
+};
+
 export const publishPost = async (
   slug: string,
   target: PublishTarget = 'markdown_download',
@@ -420,6 +441,7 @@ export const publishPost = async (
       target
     },
     details: {
+      targetKind: getPublishTargetKind(target),
       editable: post.isEditable,
       publishedTargets: post.publicationSummary.publishedTargets
     }
@@ -438,5 +460,199 @@ export const publishPost = async (
       return publishGitHubRepo(post, options);
     default:
       throw new Error(`Publish target is not implemented yet: ${target}`);
+  }
+};
+
+const unpublishGitHubRepo = async (
+  post: PostRecord,
+  options?: { actionId?: string | null; requestId?: string | null; returnToDraft?: boolean }
+) => {
+  const octokit = getOctokit();
+  const config = getGitHubRepoConfig();
+  const githubSettings = getGitHubPublishSettings();
+  const latestPublication = getLatestPublicationForTarget(post.slug, 'github_repo');
+
+  if (!latestPublication || latestPublication.status !== 'published') {
+    throw new Error('Post is not currently published to GitHub');
+  }
+
+  const path =
+    latestPublication.filePath ?? post.githubPath ?? `${config.blogPostPath}/${post.slug}.md`;
+  let sha = latestPublication.externalId ?? null;
+
+  if (!sha) {
+    const existing = await octokit.rest.repos.getContent({
+      owner: config.owner,
+      repo: config.repo,
+      path,
+      ref: config.ref
+    });
+
+    if (Array.isArray(existing.data) || existing.data.type !== 'file') {
+      throw new Error(`GitHub path is not a file: ${path}`);
+    }
+
+    sha = existing.data.sha;
+  }
+
+  let commitSha: string;
+  let externalId = sha;
+
+  logWorkflow({
+    level: 'info',
+    message: 'post.unpublish.started',
+    context: {
+      actionId: options?.actionId ?? null,
+      requestId: options?.requestId ?? null,
+      slug: post.slug,
+      target: 'github_repo'
+    },
+    details: {
+      path,
+      strategy: githubSettings.unpublishStrategy,
+      repo: `${config.owner}/${config.repo}`,
+      ref: config.ref
+    }
+  });
+
+  if (githubSettings.unpublishStrategy === 'mark_frontmatter_draft') {
+    const existing = await octokit.rest.repos.getContent({
+      owner: config.owner,
+      repo: config.repo,
+      path,
+      ref: config.ref
+    });
+
+    if (Array.isArray(existing.data) || existing.data.type !== 'file') {
+      throw new Error(`GitHub path is not a file: ${path}`);
+    }
+
+    const currentContent = Buffer.from(existing.data.content, 'base64').toString('utf-8');
+    const parsed = matter(currentContent);
+    const updatedContent = await formatMarkdown(
+      matter.stringify(parsed.content.trim(), {
+        ...parsed.data,
+        draft: true
+      })
+    );
+    const result = await octokit.rest.repos.createOrUpdateFileContents({
+      owner: config.owner,
+      repo: config.repo,
+      path,
+      branch: config.ref,
+      message: `Unpublish blog post: ${post.title}`,
+      content: Buffer.from(updatedContent).toString('base64'),
+      sha: existing.data.sha
+    });
+
+    commitSha = result.data.commit.sha ?? '';
+    externalId = result.data.content?.sha ?? existing.data.sha;
+  } else {
+    const result = await octokit.rest.repos.deleteFile({
+      owner: config.owner,
+      repo: config.repo,
+      path,
+      branch: config.ref,
+      message: `Unpublish blog post: ${post.title}`,
+      sha
+    });
+
+    commitSha = result.data.commit.sha ?? '';
+  }
+
+  const unpublishedPost = recordPostPublication(post.slug, {
+    target: 'github_repo',
+    status: 'unpublished',
+    filePath: path,
+    commitSha,
+    externalId,
+    remoteUrl: latestPublication.remoteUrl,
+    artifact: latestPublication.artifact
+  });
+
+  if (!unpublishedPost) {
+    throw new Error(`Post not found while recording unpublish: ${post.slug}`);
+  }
+
+  let nextPost = unpublishedPost;
+
+  if (
+    options?.returnToDraft &&
+    unpublishedPost.publicationSummary.livePublishedTargets.length === 0
+  ) {
+    const { updatePostStatus } = await import('./post-library');
+    nextPost =
+      updatePostStatus(unpublishedPost.slug, 'draft', 'Returned to draft after unpublish') ??
+      unpublishedPost;
+  }
+
+  logWorkflow({
+    level: 'info',
+    message: 'post.unpublish.completed',
+    context: {
+      actionId: options?.actionId ?? null,
+      requestId: options?.requestId ?? null,
+      slug: nextPost.slug,
+      target: 'github_repo'
+    },
+    details: {
+      path,
+      strategy: githubSettings.unpublishStrategy,
+      commitSha,
+      returnedToDraft: Boolean(options?.returnToDraft)
+    }
+  });
+
+  return {
+    post: nextPost,
+    commitSha
+  };
+};
+
+export const unpublishPost = async (
+  slug: string,
+  target: PublishTarget,
+  options?: { actionId?: string | null; requestId?: string | null; returnToDraft?: boolean }
+) => {
+  const definition = publishTargetDefinitions.find((item) => item.id === target);
+  if (!definition) {
+    throw new Error(`Unsupported publish target: ${target}`);
+  }
+
+  if (!definition.implemented || !definition.supportsUnpublish) {
+    throw new Error(`Unpublish is not supported for target: ${target}`);
+  }
+
+  if (!isPublishTargetReady(target)) {
+    throw new Error(`Publish target is not configured: ${target}`);
+  }
+
+  const post = getPostBySlug(slug);
+
+  if (!post) {
+    return null;
+  }
+
+  logWorkflow({
+    level: 'info',
+    message: 'post.unpublish.attempted',
+    context: {
+      actionId: options?.actionId ?? null,
+      requestId: options?.requestId ?? null,
+      slug,
+      target
+    },
+    details: {
+      targetKind: getPublishTargetKind(target),
+      currentlyPublishedTargets: post.publicationSummary.livePublishedTargets,
+      returnToDraft: Boolean(options?.returnToDraft)
+    }
+  });
+
+  switch (target) {
+    case 'github_repo':
+      return unpublishGitHubRepo(post, options);
+    default:
+      throw new Error(`Unpublish is not implemented yet for target: ${target}`);
   }
 };
